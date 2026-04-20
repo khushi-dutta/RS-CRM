@@ -1,0 +1,1704 @@
+You are building "Slar CRM" — a full-stack solar company CRM. Create a monorepo with the following structure:
+
+/slar-crm
+  /backend         → Node.js + Express + TypeScript
+  /frontend        → React + TypeScript + Vite
+  /shared          → shared TypeScript types and constants
+  /docs            → API docs
+
+Backend setup:
+- Express + TypeScript, strict mode on
+- PostgreSQL with Prisma ORM
+- Redis (ioredis) for sessions and queues
+- BullMQ for background job queues
+- Socket.io for real-time notifications
+- Winston for logging
+- Zod for validation
+- dotenv for environment management
+- Jest + Supertest for testing
+- ESLint + Prettier
+
+Frontend setup:
+- React 18 + TypeScript + Vite
+- React Router v6
+- Zustand for state management
+- TanStack Query (React Query) v5 for server state
+- Ant Design component library (antd v5)
+- Axios for HTTP
+- Socket.io-client
+- Tailwind CSS alongside antd (for custom layouts)
+- React Hook Form + Zod for forms
+- Leaflet + react-leaflet for maps
+- Three.js + @react-three/fiber for 3D solar models
+- Recharts for analytics dashboards
+- React PDF (react-pdf) for PDF preview
+- Lucide React for icons
+
+Shared:
+- All TypeScript enums for roles, statuses, notification types
+- All shared Zod schemas
+
+Create package.json with workspace scripts:
+- dev:backend, dev:frontend, dev:all
+- build:all
+- test:all
+
+Create .env.example with all required variables:
+DATABASE_URL, REDIS_URL, JWT_SECRET, JWT_REFRESH_SECRET, SENDGRID_API_KEY, META_WHATSAPP_TOKEN, META_PHONE_NUMBER_ID, AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_S3_BUCKET, GOOGLE_MAPS_API_KEY, ARKA360_API_KEY, ARKA360_BASE_URL
+
+Create initial README with setup instructions.
+
+#Step-2
+
+In /backend, create the complete Prisma schema at prisma/schema.prisma with ALL of the following models. Use PostgreSQL. Enable postgis extension for geo queries.
+
+Models to create:
+
+1. User — id, email, password (hashed), name, phone, role (enum: ADMIN, CALLING_STAFF, SALESPERSON, PROJECT_HEAD, DOCUMENTATION, WAREHOUSE, INSTALLATION, ACCOUNTANT, DEALER_ADMIN, DEALER_STAFF), dealerId (nullable FK to Dealer), zoneId (nullable FK to Zone), isActive, createdAt, updatedAt, lastLoginAt, profilePhoto (S3 url)
+
+2. Dealer — id, companyName, contactName, email, phone, address, isActive, createdAt, adminUserId (FK to User)
+
+3. Zone — id, name, coordinates (JSON polygon), city, parentZoneId (self-relation for sub-zones)
+
+4. Campaign — id, name, type (enum: WHATSAPP, EMAIL, BOTH), status (DRAFT, SCHEDULED, RUNNING, PAUSED, COMPLETED), templateId (FK), createdBy (FK User), dealerId (nullable), startedAt, completedAt, totalContacts, sent, delivered, opened, failed
+
+5. CampaignTemplate — id, name, type, subject (for email), body, variables (JSON array of string), createdBy (FK), dealerId (nullable)
+
+6. RawLead — id, name, phone, email (nullable), address, city, pincode, source (CAMPAIGN, EXCEL_UPLOAD, MANUAL), campaignId (nullable FK), assignedTo (FK User nullable), status (enum: NEW, CALLED, FOLLOW_UP, INTERESTED, NOT_INTERESTED, CALL_NOT_RECEIVED, WRONG_NUMBER, CONVERTED, DUPLICATE), followUpAt (nullable DateTime), dealerId (nullable), createdAt
+
+7. Lead — id, leadCode (LEAD-YYYY-NNNN), rawLeadId (FK), customerId (nullable FK for when converted), name, phone, email, address, city, pincode, lat, lng, assignedSalesperson (FK User), assignedCallingStaff (FK User nullable), zoneId (FK), status (enum: NEW, FOLLOW_UP, VISIT_SCHEDULED, PROPOSAL_SENT, NEGOTIATION, WON, LOST), dealerId (nullable), createdAt, updatedAt, lostReason (nullable)
+
+8. CallLog — id, entityType (RAW_LEAD, LEAD, CUSTOMER), entityId, calledBy (FK User), callType (OUTBOUND, INBOUND), disposition (FOLLOW_UP, NOT_INTERESTED, CALL_NOT_RECEIVED, WRONG_NUMBER, INTERESTED, OTHER), notes, followUpAt (nullable), duration (nullable int seconds), createdAt
+
+9. Visit — id, leadId (FK nullable), customerId (FK nullable), visitType (SALES_VISIT, SITE_SURVEY), scheduledAt, scheduledEndAt, address, lat, lng, status (SCHEDULED, CHECKED_IN, COMPLETED, CANCELLED, NO_SHOW), assignedTo (FK User), scheduledBy (FK User), checkInAt (nullable), checkInLat (nullable), checkInLng (nullable), checkInDistance (nullable float), notes, createdAt
+
+10. SolarProposal — id, leadId (FK), customerId (FK nullable), createdBy (FK User), arka360ProjectId (nullable), arka360Url (nullable), systemSizeKw, panelBrand, panelModel, panelCount, panelWattage, inverterBrand, inverterModel, inverterCapacity, structureType, legs, isDCR (boolean), roofType, annualGeneration, co2Savings, totalCost, subsidyAmount, subsidyScheme, loanApplicable, loanAmount, loanTenure, emi, netCost, status (DRAFT, SENT, ACCEPTED, REJECTED), sentAt, createdAt, model3dUrl (S3)
+
+11. Customer — id, customerCode (CUST-YYYY-NNNN), leadId (FK), name, phone, altPhone, email, address, city, pincode, lat, lng, aadhaarNumber, electricityConsumerNo, sanctionedLoad, zoneId (FK), assignedSalesperson (FK User), assignedDocumentation (FK User nullable), assignedInstallation (FK User nullable), assignedAccountant (FK User nullable), dealerId (nullable), status (enum: ACTIVE, INSTALLATION_DONE, COMPLETED), createdAt, updatedAt
+
+12. Document — id, customerId (FK), leadId (FK nullable), type (enum: AADHAAR_FRONT, AADHAAR_BACK, ELECTRICITY_BILL, CUSTOMER_SIGNATURE, SITE_PHOTO, AGREEMENT, INVOICE, OTHER), url (S3), uploadedBy (FK User), createdAt
+
+13. Invoice — id, invoiceNumber (INV-YYYY-NNNN), customerId (FK), items (JSON array: {name, qty, unit, rate, amount}), subtotal, gst, totalAmount, paidAmount, dueAmount, status (DRAFT, SENT, PARTIAL, PAID, OVERDUE), sentAt, dueDate, createdAt, generatedBy (FK User)
+
+14. Payment — id, customerId (FK), invoiceId (FK nullable), amount, paymentDate, mode (CASH, NEFT, RTGS, UPI, CHEQUE), transactionRef, milestone (BOOKING, FIRST_INSTALLMENT, SECOND_INSTALLMENT, FINAL, OTHER), recordedBy (FK User), notes, createdAt
+
+15. DocumentationChecklist — id, customerId (FK), pmSuryaAppNo (nullable), pmSuryaStatus (PENDING, SUBMITTED, APPROVED, REJECTED), cmSchemeApplicable, cmSchemeAppNo (nullable), cmSchemeStatus, loanApplicable, loanAppNo (nullable), loanStatus (PENDING, SUBMITTED, SANCTIONED, DISBURSED, NA), netMeteringAppNo (nullable), netMeteringStatus, assignedTo (FK User), completedAt (nullable), updatedAt
+
+16. SiteSurvey — id, customerId (FK), visitId (FK), conductedBy (FK User), roofDimensions (JSON), roofType, shadowAnalysis, panelCount, inverterCount, inverterModel, structureDetails, cableLength, earthingRequired, specialNotes, bomGenerated (boolean), completedAt
+
+17. BOMItem — id, siteSurveyId (FK), customerId (FK), itemName, sku, category (PANEL, INVERTER, STRUCTURE, CABLE, ACCESSORY, OTHER), quantity, unit, status (PENDING, IN_STOCK, OUT_OF_STOCK, DISPATCHED)
+
+18. StockItem — id, name, sku (unique), category, quantity, unit, lowStockThreshold, dealerId (nullable)
+
+19. StockTransaction — id, stockItemId (FK), type (IN, OUT, ADJUSTMENT), quantity, reference (nullable), notes, performedBy (FK User), customerId (FK nullable), createdAt
+
+20. Dispatch — id, customerId (FK), dispatchedBy (FK User), items (JSON), status (PENDING, DISPATCHED, DELIVERED), dispatchedAt, notes
+
+21. Notification — id, userId (FK), type, title, message, isRead, entityType, entityId, createdAt
+
+22. TimelineEvent — id, customerId (FK nullable), leadId (FK nullable), rawLeadId (FK nullable), eventType (string), description, performedBy (FK User nullable), metadata (JSON), createdAt
+
+23. EscalationLog — id, customerId (FK nullable), taskType, assignedTo (FK User), delayDays, notifiedTo (FK User), notifiedAt, resolved (boolean), resolvedAt
+
+24. AttendanceLog — id, userId (FK), visitId (FK), checkInAt, lat, lng, distance, createdAt
+
+Run prisma migrate dev --name init after schema creation. Create seed script with admin user and sample zones for Delhi (8 initial zones). Create all necessary indexes for performance (especially on status, assignedTo, dealerId, customerId fields).
+
+#step3
+
+In /backend, build the complete authentication system:
+
+1. POST /api/auth/login
+   - Accepts email + password
+   - bcrypt password comparison
+   - Returns accessToken (15min expiry) + refreshToken (7d expiry)
+   - Stores refresh token in Redis with userId as key
+   - Updates lastLoginAt on User
+   - Returns user object (no password) with role, name, dealerId, zoneId
+
+2. POST /api/auth/refresh
+   - Accepts refreshToken in body
+   - Validates against Redis
+   - Issues new accessToken + rotates refreshToken
+
+3. POST /api/auth/logout
+   - Deletes refresh token from Redis
+
+4. Middleware: authenticate
+   - Validates Bearer JWT in Authorization header
+   - Attaches req.user = { id, role, dealerId, zoneId, name }
+
+5. Middleware: authorize(...roles)
+   - Checks req.user.role is in allowed list
+   - Returns 403 if not
+
+6. Middleware: dealerScope
+   - If req.user.dealerId is set, automatically appends dealerId filter to all queries
+   - Dealer users cannot access data outside their dealerId
+
+7. Rate limiting middleware using express-rate-limit:
+   - Auth endpoints: 10 requests per minute
+   - API endpoints: 200 requests per minute
+
+8. Input sanitization middleware using express-validator
+
+9. Error handling middleware — returns consistent { success: false, error: { code, message } } shape
+
+10. Request logging middleware — logs method, path, status, duration
+
+Create /shared/types/auth.ts with all auth-related TypeScript interfaces.
+Create /shared/constants/roles.ts with role permission matrix (which role can access which module).
+
+Write Jest tests for auth endpoints covering: successful login, wrong password, expired token, refresh rotation, logout.
+
+#step4
+Build the complete Campaigns and Raw Leads backend in /backend:
+
+CAMPAIGN ENDPOINTS (role: CALLING_STAFF, DEALER_ADMIN):
+- GET /api/campaigns — list with filters (status, type, dateRange), pagination
+- POST /api/campaigns — create campaign with templateId, type, scheduledAt
+- GET /api/campaigns/:id — full detail with contact stats
+- PATCH /api/campaigns/:id/status — start, pause, complete
+- DELETE /api/campaigns/:id — only if DRAFT
+
+TEMPLATE ENDPOINTS:
+- GET /api/templates — list templates for user's scope
+- POST /api/templates — create with body, variables array, subject
+- GET /api/templates/:id
+- PUT /api/templates/:id
+- DELETE /api/templates/:id
+
+RAW LEAD ENDPOINTS:
+- GET /api/raw-leads — paginated list with filters: status, assignedTo, followUpDate range, source
+- POST /api/raw-leads — create single raw lead manually
+- POST /api/raw-leads/bulk — accepts parsed JSON array from Excel upload (max 5000 records), validates, deduplicates by phone, bulk inserts, returns {inserted, duplicates, errors}
+- GET /api/raw-leads/:id
+- PATCH /api/raw-leads/:id — update status, followUpAt, notes
+- POST /api/raw-leads/:id/call-log — add call disposition
+- POST /api/raw-leads/:id/convert — converts to Lead (triggers lead creation + salesperson assignment)
+
+EXCEL PARSING:
+- POST /api/raw-leads/parse-excel — accepts multipart file upload, uses xlsx library to parse, returns column headers + first 5 rows for field mapping UI, returns parsed data as JSON
+
+CAMPAIGN SENDING (BullMQ jobs):
+- WhatsApp job: calls Meta Cloud API v18 for each contact, handles 429 rate limiting with exponential backoff, stores delivery receipts
+- Email job: SendGrid bulk send with tracking pixel
+- Both jobs update Campaign delivered/opened/failed counts via webhook endpoints
+
+Create webhook endpoints:
+- POST /api/webhooks/whatsapp — handles Meta delivery receipts, inbound message replies
+- POST /api/webhooks/sendgrid — handles open/click events
+
+All endpoints enforce dealerScope middleware. Write 20+ Jest tests.
+
+#step5
+Build the Calling Staff role dashboard and all its screens in /frontend/src/pages/calling-staff/.
+
+DASHBOARD PAGE (/calling-staff/dashboard):
+Metric cards row: Today's follow-ups due, Active campaigns, Total raw leads this month, Conversion rate (raw→lead %)
+Below: "Today's Follow-ups" table — name, phone, last call disposition, scheduled time, quick-action buttons (Call Logged, Mark No Answer, Convert)
+Right panel: Mini campaign status list (name, status badge, sent/delivered counts)
+Notification bell shows unread count.
+
+CAMPAIGNS PAGE (/calling-staff/campaigns):
+- Table of all campaigns with status badge color-coded (Draft=gray, Running=green, Paused=amber, Completed=blue)
+- "New Campaign" button opens a right-side drawer:
+  Step 1: Name, type selector (WhatsApp/Email/Both), pick or create template
+  Step 2: Upload contacts Excel or add manually — show parsed preview table with column mapping dropdowns
+  Step 3: Schedule (send now or pick date/time) → Confirm
+- Campaign detail page: live stats bar (sent/delivered/opened/failed), contact list with individual status
+
+TEMPLATE BUILDER (/calling-staff/templates):
+- Rich text editor for email body (use React Quill)
+- WhatsApp template editor (plain text with {{variable}} highlighting)
+- Variable suggestions panel on the right
+- Preview panel showing rendered output with sample data
+
+RAW LEADS PAGE (/calling-staff/raw-leads):
+- Kanban board view (columns: New, Called, Follow-up, Interested, Not Interested) with drag disabled (status changes via action)
+- Also a table view toggle
+- Search bar, filter dropdown (source, date, assigned to, status)
+- Row actions: Log Call (opens modal with disposition radio buttons + notes + follow-up date picker), Convert to Lead
+- Bulk actions: assign to calling staff, export CSV
+- Excel upload button with drag-and-drop zone, column mapping screen, import preview
+
+CALL LOG MODAL:
+Disposition options with icons: Follow Up (calendar icon + date picker), Not Interested, Call Not Received, Wrong Number, Interested, Convert to Lead
+Notes textarea, call duration (manual entry or timer button)
+
+All components use Ant Design. Use TanStack Query for all data fetching with optimistic updates. Use Zustand for UI state (active filters, selected rows). Real-time updates via Socket.io for campaign progress.
+
+#step6
+
+Build the geo-assignment and zone management system:
+
+ZONE MANAGEMENT (Admin only):
+- GET /api/zones — list all zones with salesperson counts
+- POST /api/zones — create zone with name + GeoJSON polygon coordinates
+- PUT /api/zones/:id — update polygon, name
+- DELETE /api/zones/:id — only if no active salespersons
+- GET /api/zones/:id/salespersons — list salespersons in zone
+
+ASSIGNMENT ENGINE (service: /backend/src/services/assignment.service.ts):
+
+function assignSalesperson(leadLat: number, leadLng: number, dealerId?: string): Promise<User>
+
+Logic:
+1. Find which zone contains the lead coordinates using point-in-polygon algorithm (use the 'point-in-polygon' npm package with zone GeoJSON boundaries)
+2. Get all active SALESPERSON users in that zone (filtered by dealerId if applicable)
+3. For each salesperson, count their active leads (status NOT in [WON, LOST])
+4. Pick the salesperson with the fewest active leads (load balancing)
+5. If tie, calculate Haversine distance from each tied salesperson's last known location (from their most recent AttendanceLog) and pick the nearest
+6. If no salesperson in zone, expand to adjacent zones (zones sharing polygon edges), repeat step 3–5
+7. If still none, assign to the salesperson with fewest active leads across all zones
+8. Return assigned User, log the assignment reason in TimelineEvent
+
+GEO UTILITY FUNCTIONS (/backend/src/utils/geo.ts):
+- haversineDistance(lat1, lng1, lat2, lng2): number — returns meters
+- isWithinRadius(centerLat, centerLng, pointLat, pointLng, radiusMeters): boolean
+- pointInPolygon(lat, lng, polygonCoords: [number,number][]): boolean
+- getAddressCoordinates(address: string): Promise<{lat, lng}> — uses Google Maps Geocoding API
+- reverseGeocode(lat, lng): Promise<string> — returns formatted address
+
+CHECK-IN SYSTEM:
+- POST /api/visits/:id/checkin
+  - Receives { lat, lng } from device
+  - Calculates distance from visit.lat/lng using haversineDistance
+  - If distance > 200m: returns { canCheckIn: false, distance, required: 200 }
+  - If distance <= 200m: creates AttendanceLog, updates Visit.status to CHECKED_IN, returns { canCheckIn: true }
+- GET /api/visits/:id/checkin-status — returns whether user is within 200m right now (real-time polling)
+
+LEAD ENDPOINTS:
+- GET /api/leads — paginated, filters: status, assignedSalesperson, zoneId, dateRange
+- GET /api/leads/:id — full lead with timeline, visits, proposals, call logs
+- POST /api/leads/:id/call-log
+- PATCH /api/leads/:id — update status, notes
+- POST /api/leads/convert-to-customer — triggers customer creation
+
+Write unit tests for all geo utility functions with known coordinate pairs. Test point-in-polygon with Delhi zone boundaries.
+
+#step7
+Build the complete visit scheduling system (used by both Calling Staff and Salesperson roles):
+
+VISIT ENDPOINTS:
+- GET /api/visits — list with filters: type, status, assignedTo, date, customerId, leadId
+- POST /api/visits — schedule a visit
+  Body: { leadId OR customerId, visitType, scheduledAt, notes, assignedTo }
+  - Auto-geocodes address if lat/lng not present using Google Maps API
+  - Creates TimelineEvent
+  - Sends WhatsApp + email confirmation to customer with date/time
+  - Notifies assigned salesperson/installer via Socket.io + in-app notification
+- GET /api/visits/:id
+- PATCH /api/visits/:id — reschedule (updates scheduledAt, re-notifies)
+- DELETE /api/visits/:id — cancel (status=CANCELLED, notifies customer)
+- GET /api/visits/my-route — returns today's visits for req.user sorted by optimal route order using nearest-neighbor algorithm on coordinates
+- GET /api/visits/calendar — returns visits as calendar events (FullCalendar format) for date range
+
+ROUTE OPTIMIZATION (service):
+function optimizeRoute(visits: Visit[]): Visit[]
+- Uses nearest-neighbor greedy algorithm starting from first visit
+- Returns visits array sorted by travel order
+- Calculates total estimated distance in km
+
+VISIT FORM ENDPOINTS (after check-in):
+- GET /api/visits/:id/form — get current form data
+- PUT /api/visits/:id/form — save/update sales visit form fields:
+  { panelBrand, panelModel, panelCount, panelWattage, panelCompany, inverterBrand, inverterCapacity, legs, isDCR, roofType, systemSizeKw, subsidyApplicable, loanApplicable, notes }
+- POST /api/visits/:id/complete — marks visit completed, creates TimelineEvent
+
+DOCUMENT UPLOAD for visits:
+- POST /api/visits/:id/documents — multipart upload
+  - Accepts: aadhaar_front, aadhaar_back, electricity_bill, signature (base64 canvas export), site_photos (multiple)
+  - Uploads to S3 with path: documents/{customerId}/{docType}/{timestamp}.{ext}
+  - Creates Document records
+  - Returns S3 URLs
+
+SIGNATURE CAPTURE:
+The signature upload endpoint accepts base64 PNG data URL from a canvas signature pad on the frontend. Convert to Buffer and upload to S3.
+
+#step 8
+
+Build the complete Salesperson role interface in /frontend/src/pages/salesperson/.
+
+DASHBOARD (/salesperson/dashboard):
+Top stats row: Active Leads, Today's Visits, This Month Conversions, Pending Follow-ups
+"Today's Route" card — ordered list of today's visits with: customer name, address, scheduled time, distance from previous stop, status badge. "Open Map" button.
+"My Leads Pipeline" — horizontal funnel bars showing count at each stage
+Recent activity feed (last 10 call logs / visit completions)
+"Quick Actions" floating button: Log Call, Schedule Visit, New Follow-up
+
+MY LEADS PAGE (/salesperson/leads):
+- Kanban board with columns: New, Follow-up, Visit Scheduled, Proposal Sent, Negotiation, Won, Lost
+- Each card shows: lead name, phone, address, assigned date, next action date
+- Clicking a card opens a Lead Detail drawer:
+  - Header: name, lead ID, phone, address, days since assigned
+  - Tabs: Overview | Call History | Visits | Proposals | Timeline
+  - Action buttons: Log Call, Schedule Visit, Create Proposal, Mark Won/Lost
+
+MAP VIEW (/salesperson/route):
+- Full-screen Leaflet map
+- Today's visits as numbered pins (1, 2, 3...) in route order
+- Polyline connecting stops in order
+- User's current location as blue dot (Geolocation API, updates every 30s)
+- Clicking a pin shows visit card popup with Check-in button (enabled when within 200m)
+- Distance indicator: "You are Xm away from next stop"
+
+VISIT DETAIL & FORM (/salesperson/visits/:id):
+- Visit header: customer/lead name, scheduled time, address, status badge
+- Check-in section: shows live distance to location, large "Check In" button (disabled until ≤200m)
+- After check-in, form unlocks:
+  Tabs: Solar Details | Customer Documents | Signature
+  Solar Details: all panel/inverter/structure fields
+  Documents: upload zones for Aadhaar front/back, electricity bill (drag-drop + camera on mobile)
+  Signature: react-signature-canvas component with clear/save buttons
+- "Generate Proposal" button at bottom → navigates to Proposal/Arka360 page
+- "Complete Visit" button → marks done, navigates back
+
+VISIT SCHEDULING MODAL (reusable, used on both Calling Staff and Salesperson):
+- Lead/Customer name (pre-filled or searchable)
+- Visit type selector
+- Date + time picker (Ant Design DateTimePicker)
+- Assign to (dropdown of salesperson/installer in the lead's zone)
+- Notes
+- Shows address + mini map preview (Leaflet, non-interactive) of the location
+
+All pages fully responsive for mobile use (salesperson will primarily use mobile).
+
+#step 9A
+In /backend/src/services/solar-engine/ build the complete native solar calculation engine. No external APIs — all math is self-contained.
+
+═══════════════════════════════════════
+FILE: solar-calculator.ts
+═══════════════════════════════════════
+
+Export the following pure functions (all unit-tested):
+
+/* ── 1. SYSTEM SIZING ── */
+export function recommendSystemSize(input: {
+  monthlyBillAvg: number,     // ₹
+  tariffPerUnit: number,       // ₹/kWh
+  peakSunHours?: number,       // default 5.5 for Delhi
+  systemEfficiency?: number,   // default 0.80 (80%)
+}): { recommendedKw: number, monthlyConsumptionKwh: number }
+
+Logic:
+  monthlyConsumptionKwh = monthlyBillAvg / tariffPerUnit
+  dailyConsumptionKwh = monthlyConsumptionKwh / 30
+  recommendedKw = dailyConsumptionKwh / (peakSunHours × systemEfficiency)
+  Round up to nearest 0.5 kW
+
+
+/* ── 2. PANEL COUNT ── */
+export function calculatePanelCount(systemKw: number, panelWattage: number): number
+  panelCount = ceil(systemKw × 1000 / panelWattage)
+
+
+/* ── 3. ANNUAL GENERATION ── */
+export function calculateAnnualGeneration(input: {
+  systemKw: number,
+  performanceRatio?: number,   // default 0.75
+  peakSunHours?: number,       // default 5.5
+}): { annualKwh: number, monthlyBreakdown: MonthlyGeneration[] }
+
+Monthly peak sun hours for Delhi (hardcoded lookup table):
+  Jan:4.8, Feb:5.2, Mar:5.8, Apr:6.2, May:6.5, Jun:5.5,
+  Jul:4.5, Aug:4.8, Sep:5.2, Oct:5.5, Nov:5.0, Dec:4.6
+
+monthlyKwh[m] = systemKw × PR × peakSunHours[m] × daysInMonth[m]
+annualKwh = sum of all monthlyKwh
+
+
+/* ── 4. SUBSIDY CALCULATION ── */
+export function calculateSubsidy(input: {
+  systemKw: number,
+  scheme: 'PM_SURYA_GHAR' | 'CM_SCHEME' | 'BOTH' | 'NONE',
+  state?: string,              // default 'DELHI'
+}): {
+  pmSuryaGharAmount: number,
+  cmSchemeAmount: number,
+  totalSubsidy: number,
+  slabBreakdown: SubsidySlab[],
+}
+
+PM Surya Ghar slabs (update via admin config, hardcoded defaults):
+  ≤ 1 kW: ₹30,000/kW
+  1–2 kW: ₹30,000/kW (for first kW) + ₹30,000/kW (for remaining, capped)
+  2–3 kW: ₹60,000 (for 2kW) + ₹18,000 (for the extra kW)
+  > 3 kW: capped at ₹78,000 total
+  
+Delhi CM Scheme (configurable defaults):
+  ≤ 3 kW: ₹2,000/kW additional
+  > 3 kW: ₹6,000 flat
+
+Return slabBreakdown array showing how each slab is applied.
+
+
+/* ── 5. FINANCIAL CALCULATIONS ── */
+export function calculateFinancials(input: {
+  totalSystemCost: number,
+  subsidyAmount: number,
+  annualKwh: number,
+  tariffPerUnit: number,
+  annualTariffEscalation?: number,  // default 0.03 (3% per year)
+  systemLifeYears?: number,          // default 25
+  loanAmount?: number,
+  loanRatePercent?: number,
+  loanTenureMonths?: number,
+}): FinancialResult
+
+FinancialResult = {
+  netCost: number,                    // totalCost - subsidy
+  annualSavingsYear1: number,         // annualKwh × tariff
+  paybackYears: number,               // netCost / avgAnnualSavings
+  lifetimeSavings: number,            // sum of savings over 25yr with escalation
+  roi25yr: number,                    // % return
+  irr: number,                        // IRR using Newton-Raphson on cash flows
+  emi: number | null,                 // monthly EMI if loan
+  loanTotalCost: number | null,       // total paid incl. interest
+  yearlyProjection: YearlyProjection[], // 25 rows: year, generation, savings, cumulative
+}
+
+IRR calculation:
+  cashFlows = [-netCost, savingsY1, savingsY2, ... savingsY25]
+  Use Newton-Raphson iteration (max 100 iterations, tolerance 0.0001)
+  
+EMI formula: P × r × (1+r)^n / ((1+r)^n - 1)
+  where r = monthlyRate, n = tenureMonths
+
+CO2 savings:
+  co2KgPerYear = annualKwh × 0.716  // India grid emission factor kg CO2/kWh
+  co2TonnesPer25yr = co2KgPerYear × 25 / 1000
+  treesEquivalent = co2TonnesPer25yr × 1000 / 21.7  // avg tree absorbs 21.7kg/yr
+
+export function calculateCO2(annualKwh: number): CO2Result
+
+
+/* ── 6. ROOF AREA VALIDATOR ── */
+export function validateRoofForSystem(input: {
+  roofAreaSqFt: number,
+  systemKw: number,
+  panelWattage: number,
+}): { fits: boolean, requiredSqFt: number, availableSqFt: number, maxKwForRoof: number }
+
+Area per panel: 580W panel ≈ 32 sq ft, 540W ≈ 30 sq ft, 440W ≈ 26 sq ft
+Use lookup: wattage → sqft/panel (configurable table)
+Also account for row spacing shadow clearance (1.5× panel height)
+
+
+/* ── 7. STRING CONFIGURATION ── */
+export function calculateStringConfig(input: {
+  panelCount: number,
+  inverterModel: InverterSpec,   // { maxInputVoltage, mpptVoltageRange, maxInputCurrent, mpptCount }
+  panelSpec: PanelSpec,          // { voc, vmpp, isc, impp, tempCoeffVoc }
+  minAmbientTemp?: number,       // default -5°C for Delhi winter
+  maxAmbientTemp?: number,       // default 45°C Delhi summer
+}): StringConfig
+
+StringConfig = {
+  stringsCount: number,
+  panelsPerString: number,
+  configLabel: string,           // e.g. "2S × 11P" (2 strings of 11 panels)
+  winterVoc: number,             // must be < inverter maxInputVoltage
+  summerVmpp: number,            // must be > inverter MPPT min
+  isValid: boolean,
+  warnings: string[],
+}
+
+Voc temperature correction: Voc(T) = Voc(STC) × (1 + tempCoeffVoc × (T - 25))
+Check against inverter voltage limits.
+
+═══════════════════════════════════════
+FILE: panel-database.ts
+FILE: inverter-database.ts
+═══════════════════════════════════════
+
+Create a seeded database of common products used in India:
+
+PANELS (seed 15+ models):
+{ brand, model, wattage, voc, vmpp, isc, impp, tempCoeffVoc, efficiency, length_mm, width_mm, weight_kg, isDCR, warranty_years }
+
+Include: Waaree (440W, 540W, 580W), Adani Solar, Vikram Solar, Tata Power Solar, RenewSys, Canadian Solar, Jinko Solar models popular in India
+
+INVERTERS (seed 10+ models):
+{ brand, model, capacityKw, maxInputVoltage, mpptVoltageMin, mpptVoltageMax, maxInputCurrent, mpptCount, efficiency, warranty_years, phase }
+
+Include: Havells, Solis, Growatt, SolarEdge, Huawei, Delta, Goodwe, Fronius
+
+Store in Prisma (SolarPanel and SolarInverter tables — add to schema).
+Admin can add/edit/delete products.
+
+═══════════════════════════════════════
+ENDPOINTS: /api/solar-engine/
+═══════════════════════════════════════
+
+POST /api/solar-engine/size
+  Body: { monthlyBill, tariff, peakSunHours? }
+  Returns: recommendSystemSize result
+
+POST /api/solar-engine/calculate
+  Body: full proposal input
+  Returns: { generation, subsidy, financials, co2, stringConfig, roofValidation }
+
+GET /api/solar-engine/panels — all panels with filters (brand, wattage range, isDCR)
+GET /api/solar-engine/inverters — all inverters with filters (capacity range, phase)
+GET /api/solar-engine/subsidy-slabs — current slab config (admin can update via PUT)
+PUT /api/solar-engine/subsidy-slabs — admin only, updates slab config in Redis + DB
+
+Write 50+ unit tests in solar-calculator.test.ts covering edge cases:
+- System size for ₹5000 bill at ₹8/unit
+- Panel count rounding (never under-size)
+- String config for various panel/inverter combinations including invalid configs
+- IRR convergence for standard cases
+- Subsidy boundary conditions (exactly 2kW, exactly 3kW)
+- Roof area exactly fitting vs 1 panel over capacity
+
+#step9B
+Build the native 3D roof analysis and panel placement tool in /frontend/src/components/solar-designer/.
+
+This is the core visual feature — replaces what Arka360 does. Built entirely with Three.js, Leaflet, and custom geometry math.
+
+═══════════════════════════════════════
+COMPONENT 1: RoofMapper.tsx
+═══════════════════════════════════════
+
+A Leaflet map component that lets the user trace the roof boundary on a satellite image.
+
+Libraries needed:
+  - react-leaflet (already in stack)
+  - leaflet-draw (polygon/polyline drawing tools)
+  - Google Maps Static API (for satellite tiles as Leaflet tile layer)
+
+FEATURES:
+1. Satellite tile layer using Google Maps Static API tiles
+   TileLayer url: https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}
+
+2. Address input with Google Places autocomplete → map flies to location
+
+3. Roof polygon drawing tool:
+   - User clicks "Draw Roof" → Leaflet draw polygon mode activates
+   - User traces the roof outline by clicking corners
+   - Double-click to close polygon
+   - Shows polygon area in sq ft (real-time as user draws)
+   - Multiple polygons allowed (multiple roof sections)
+   - Each polygon gets a name (Roof Section 1, 2...) and a color
+
+4. Obstruction marking tool:
+   - "Mark Obstruction" button → draws smaller polygons for water tanks, AC units, vents, trees
+   - Obstructions are marked red, excluded from panel placement
+
+5. Tilt angle input per roof section (0–45°, default 10° for flat roof, 20° for sloped)
+6. Azimuth input per roof section (0–360°, default 180° = South for India)
+
+7. Area calculation:
+   - Uses Shoelace formula on lat/lng coordinates converted to meters
+   - Accounts for tilt: actual panel placement area = flat_area / cos(tilt)
+   - Excludes obstruction polygons
+   - Shows: total roof area, usable area, shadow-affected area (estimated)
+
+8. Export: converts polygon coords to { lat, lng } arrays stored in proposal
+
+Props: { address, lat, lng, onChange(roofData: RoofSection[]) }
+
+RoofSection = {
+  id: string,
+  name: string,
+  polygon: LatLng[],
+  tiltDeg: number,
+  azimuthDeg: number,
+  areaSqFt: number,
+  usableAreaSqFt: number,
+  obstructions: LatLng[][],
+}
+
+═══════════════════════════════════════
+COMPONENT 2: PanelLayoutEngine.ts (pure TypeScript, no UI)
+═══════════════════════════════════════
+
+Given a RoofSection and panel dimensions, auto-place panels:
+
+export function generatePanelLayout(input: {
+  roofPolygon: Point[],          // in meters, relative to roof center
+  obstructions: Point[][],
+  panelWidthM: number,           // e.g. 1.134m for 580W
+  panelHeightM: number,          // e.g. 2.278m
+  tiltDeg: number,
+  azimuthDeg: number,
+  rowSpacingMultiplier?: number, // default 1.5 (1.5× panel height for shadow clearance)
+  edgeSetbackM?: number,         // default 0.5m from roof edge
+  orientation: 'PORTRAIT' | 'LANDSCAPE',
+}): PanelLayoutResult
+
+PanelLayoutResult = {
+  panels: PanelPosition[],        // array of placed panels
+  count: number,
+  coveredAreaSqFt: number,
+  layoutEfficiency: number,       // panels_area / usable_roof_area
+}
+
+PanelPosition = {
+  id: number,
+  x: number, y: number,          // center position in meters
+  row: number, col: number,
+  isShaded: boolean,             // from shadow analysis
+  stringId: number,              // which string this panel belongs to
+}
+
+Algorithm:
+1. Rotate coordinate system to align with azimuth
+2. Apply edge setback (shrink polygon inward by setbackM)
+3. Grid-fill with panel dimensions + row spacing
+4. For each potential panel position: check if panel bounding rect is inside roof polygon (not in obstruction)
+5. Assign strings: fill row by row, max panels per string from string config
+6. Return all valid panel positions
+
+Shadow clearance row spacing:
+  shadowFreeDistance = panelHeight × cos(tiltDeg) + panelHeight × sin(tiltDeg) / tan(sunElevationAngle)
+  sunElevationAngle for Delhi winter solstice noon ≈ 32° (28.6° latitude - 23.5° declination)
+
+═══════════════════════════════════════
+COMPONENT 3: Solar3DViewer.tsx
+═══════════════════════════════════════
+
+A Three.js (@react-three/fiber) 3D visualization of the roof with panels.
+
+Scene composition:
+1. ROOF MESH:
+   - Extrude the roof polygon (from RoofMapper) into a 3D shape
+   - Flat roofs: thin box (0.3m height), white/light gray material
+   - Apply tilt rotation around the azimuth axis
+   - Roof texture: subtle concrete/tile material (MeshLambertMaterial)
+
+2. PANEL MESHES (generated from PanelLayoutEngine output):
+   - Each panel = thin BoxGeometry (panelWidth × panelHeight × 0.04m)
+   - Blue MeshStandardMaterial with slight metallic sheen (metalness: 0.3, roughness: 0.6)
+   - Panel grid lines: thin EdgesGeometry overlay in lighter blue
+   - Shaded panels: slightly darker blue tint
+   - On hover: panel highlights yellow, shows tooltip (panel #, string #, estimated W)
+
+3. HOUSE BODY (optional, for context):
+   - Simple box geometry below the roof representing the building
+   - Gray material
+
+4. SUN POSITION INDICATOR:
+   - Animated yellow sphere following a arc path
+   - Arc represents sun's path for selected date/time
+   - Toggle: Today | Winter Solstice | Summer Solstice
+   - Shadow casting enabled (Three.js shadowMap) so panels cast actual shadows on roof
+   - User can drag a time-of-day slider (6am → 6pm) to see shadow movement
+   - Real sun position calculated using solar azimuth/elevation formula:
+     declination = 23.45 × sin(360/365 × (dayOfYear - 81))
+     hourAngle = 15 × (solarHour - 12)
+     elevation = arcsin(sin(lat)×sin(dec) + cos(lat)×cos(dec)×cos(ha))
+     azimuth = arctan2(-cos(dec)×sin(ha), sin(lat)×cos(dec)×cos(ha) - cos(lat)×sin(dec))
+     Delhi latitude = 28.6°
+
+5. SHADING ANALYSIS from sun simulation:
+   - For each hour 8am-4pm, calculate which panels are in shadow from obstructions/other panels
+   - Panel shading% = (shaded hours / total hours)
+   - Color panels by shading%: green (0-10%), yellow (10-25%), red (>25%)
+   - Toggle: "Show Shading Analysis" overlays heatmap on panels
+
+6. CONTROLS:
+   OrbitControls (mouse drag to rotate, scroll to zoom, right-click to pan)
+   Buttons: Top View | South View | Reset Camera
+   Toggle: 3D House View | Flat Roof Plan View
+   
+7. STATS OVERLAY (top-right corner of viewer):
+   Panel count: XX
+   Total capacity: X.X kW
+   Layout efficiency: XX%
+   Shading loss: X%
+
+CAMERA setup: PerspectiveCamera, fov 45, positioned above and south of roof
+LIGHTING: AmbientLight (0.4) + DirectionalLight (sun, castShadow: true, shadowMapSize: 2048)
+Background: sky gradient (#87CEEB → #E0F0FF) or transparent
+
+Props: {
+  roofSections: RoofSection[],
+  panelLayout: PanelLayoutResult,
+  sunDate?: Date,
+  showShading?: boolean,
+  onPanelClick?: (panelId: number) => void,
+}
+
+#step 9C
+Build the shadow simulation engine — a pure TypeScript module, no external dependencies.
+
+FILE: /frontend/src/utils/shadow-engine.ts
+(Also expose via backend endpoint for PDF report generation)
+
+═══════════════════════════════════════
+SUN POSITION MATH
+═══════════════════════════════════════
+
+export function getSunPosition(input: {
+  date: Date,
+  lat: number,     // Delhi: 28.6144
+  lng: number,     // Delhi: 77.2090
+  timezone: number // India: +5.5
+}): SunPosition
+
+// Spencer's equation for day of year
+dayOfYear = getDayOfYear(date)
+B = 360/365 × (dayOfYear - 81) in degrees
+
+// Equation of time (minutes)
+EoT = 9.87×sin(2B) - 7.53×cos(B) - 1.5×sin(B)
+
+// Solar declination
+declination = 23.45 × sin(B)
+
+// Local solar time
+solarTime = clockTime + EoT/60 + (lng - timezone×15)/15
+
+// Hour angle (15° per hour from solar noon)
+hourAngle = 15 × (solarTime - 12)
+
+// Solar elevation
+elevation = arcsin(sin(lat)×sin(dec) + cos(lat)×cos(dec)×cos(hourAngle))
+
+// Solar azimuth (degrees from North, clockwise)
+azimuth = arctan2(-cos(dec)×sin(hourAngle), 
+           sin(lat)×cos(dec)×cos(hourAngle) - cos(lat)×sin(dec))
+azimuth = (azimuth + 360) % 360
+
+SunPosition = { elevation: number, azimuth: number, isAboveHorizon: boolean }
+
+
+═══════════════════════════════════════
+SHADOW CASTING
+═══════════════════════════════════════
+
+export function castPanelRowShadow(input: {
+  panelHeightM: number,
+  panelTiltDeg: number,
+  panelAzimuthDeg: number,
+  sunElevationDeg: number,
+  sunAzimuthDeg: number,
+}): number  // shadow length in meters
+
+// Project panel height onto horizontal plane accounting for tilt
+effectiveHeight = panelHeightM × sin(tiltDeg)
+shadowLength = effectiveHeight / tan(sunElevationDeg)
+// Project shadow in sun direction (perpendicular component)
+shadowInRowDirection = shadowLength × cos(panelAzimuthDeg - sunAzimuthDeg)
+return max(0, shadowInRowDirection)
+
+
+export function isPointShaded(input: {
+  point: Point3D,
+  obstructions: Obstruction3D[],  // { basePolygon, heightM }
+  sunPosition: SunPosition,
+}): boolean
+
+// Cast ray from point in sun direction (reverse)
+// Check ray intersection with each obstruction mesh
+// Use ray-AABB intersection for speed
+// Returns true if any obstruction blocks the sun
+
+
+═══════════════════════════════════════
+ANNUAL SHADING ANALYSIS
+═══════════════════════════════════════
+
+export async function runAnnualShadingAnalysis(input: {
+  panels: PanelPosition[],
+  roofTiltDeg: number,
+  roofAzimuthDeg: number,
+  obstructions: Obstruction3D[],
+  lat: number,
+  lng: number,
+  sampleHoursPerDay?: number,   // default 9 (8am-4pm)
+  sampleDaysPerMonth?: number,  // default 4 (representative days)
+}): Promise<ShadingReport>
+
+Algorithm:
+  For each month (12):
+    Pick 4 representative days
+    For each day, simulate sun from 8am to 4pm (hourly)
+    For each hour with sun elevation > 5°:
+      For each panel:
+        Check isPointShaded for panel center + 4 corners
+        Panel shading fraction = shaded_check_points / 5
+    Monthly shading loss = avg(panel shading fractions) weighted by irradiance
+  
+  Annual shading loss = weighted average of monthly losses
+
+ShadingReport = {
+  annualLossPercent: number,
+  monthlyLoss: { month: number, lossPercent: number }[],
+  panelShading: { panelId: number, annualLossPercent: number }[],  // per-panel
+  heatmapData: { panelId: number, color: string }[],  // for 3D viewer
+  worstMonth: string,
+  recommendation: string,  // e.g. "Consider trimming the tree on the north side"
+}
+
+Run this as a Web Worker to avoid blocking the UI thread:
+FILE: /frontend/src/workers/shading.worker.ts
+Use Comlink (comlink npm package) to communicate with the worker.
+
+
+═══════════════════════════════════════
+BACKEND ENDPOINT
+═══════════════════════════════════════
+
+POST /api/solar-engine/shading-report
+  Body: { panels, roofTiltDeg, roofAzimuthDeg, obstructions, lat, lng }
+  Runs the same analysis on the server (for PDF embedding)
+  Returns ShadingReport
+  Caches result by hash(input) in Redis (24hr TTL)
+
+The annual shading analysis adjusts the annual generation:
+  adjustedAnnualKwh = baseAnnualKwh × (1 - shadingLossPercent/100)
+
+
+#step 9D
+Build the complete Solar Proposal Designer page — the main interface where salesperson designs and generates a proposal.
+
+FILE: /frontend/src/pages/salesperson/SolarDesigner.tsx
+Route: /salesperson/solar-designer?leadId=XXX (or customerId=XXX)
+
+This is a multi-step full-page wizard. Steps shown as a top progress bar.
+
+═══════════════════════════════════════
+STEP 1: SITE MAPPING (RoofMapper component)
+═══════════════════════════════════════
+- Address auto-filled from lead, editable
+- Leaflet satellite map with draw tools
+- User draws roof polygon(s), marks obstructions
+- Tilt + azimuth per roof section
+- Live area display in sq ft
+- "Auto-detect using satellite" hint text (manual for now, future: ML)
+- Next button disabled until at least one roof polygon drawn
+
+═══════════════════════════════════════
+STEP 2: SYSTEM CONFIGURATION
+═══════════════════════════════════════
+LEFT PANEL — inputs:
+- Monthly electricity bill (₹) → auto-shows "Recommended: X kW" badge
+- Electricity tariff (₹/unit, default 8)
+- System size (kW) — slider + number input, min 1 kW, max roof capacity
+- Panel brand dropdown → Panel model dropdown (filtered, shows specs)
+  Specs shown: Wattage, Voc, efficiency, size (L×W mm), DCR badge
+- Inverter brand → model dropdown
+  Specs shown: Capacity, MPPT count, max voltage
+- Orientation toggle: Portrait / Landscape
+- "Auto-Layout Panels" button → runs PanelLayoutEngine, places panels on 3D view
+
+RIGHT PANEL — Live 3D Viewer (Solar3DViewer component, updates as config changes):
+- Shows panels placed on the roof drawn in Step 1
+- Panel count badge overlay
+- Sun slider (time of day 6am-6pm)
+- Toggle buttons: 3D View | Top Plan | Shading Analysis
+- "Run Shading Analysis" button (async, shows progress, updates panel colors when done)
+
+STEP 2 AUTO-CALCULATIONS (update instantly on any field change):
+  useEffect watching [systemKw, panelModel, inverterModel, roofSections]:
+    - recalculate panelCount
+    - recalculate stringConfig (show config badge: e.g. "2S × 11P — ✓ Valid")
+    - recalculate roofValidation (show "Fits ✓" or "Overflow ✗ — max X kW for this roof")
+    - update 3D viewer panel layout
+
+═══════════════════════════════════════
+STEP 3: FINANCIAL CALCULATOR
+═══════════════════════════════════════
+This step is a real-time financial workbench.
+
+COST BREAKDOWN TABLE (editable):
+  Line items:
+  - Solar panels: panelCount × ₹/W × wattage (rate editable, per-watt pricing)
+  - Inverter: fixed price (lookup from inverter DB, editable)
+  - Mounting structure: per kW rate (editable)
+  - Cables & accessories: estimated (editable)
+  - Installation charges: per kW (editable)
+  - GST (12% on panels + structure, 18% on inverter + installation — auto-calculated)
+  - Total system cost (auto-sum)
+
+SUBSIDY SECTION:
+  Scheme checkboxes: PM Surya Ghar / Delhi CM Scheme / Both / None
+  System shows slab breakdown in a table:
+  | Slab | Applicable kW | Rate | Amount |
+  | ≤2 kW | 2 kW | ₹30,000/kW | ₹60,000 |
+  | 2–3 kW | 0.5 kW | ₹18,000/kW | ₹9,000 |
+  Total subsidy: ₹69,000 ← bold
+
+  Net cost after subsidy (large, prominent)
+
+LOAN SECTION (collapsible):
+  Toggle: Loan applicable yes/no
+  If yes:
+  - Loan amount (default = netCost, editable)
+  - Interest rate % (editable)
+  - Tenure months (slider 12–240)
+  - EMI: ₹XX,XXX/month (auto-calculated, large display)
+  - Total interest paid: ₹XX,XXX
+
+SAVINGS PROJECTION:
+  Interactive chart (Recharts ComposedChart):
+  - X-axis: Years 1–25
+  - Bar: Annual savings (grows with tariff escalation)
+  - Line: Cumulative savings
+  - Dashed vertical line: Payback year (labeled "Payback in X.X years")
+  
+  KPI cards below chart:
+  - Payback period: X.X years
+  - 25-year lifetime savings: ₹XX Lakhs
+  - IRR: XX%
+  - CO2 saved: XX tonnes = XXXX trees equivalent
+
+Tariff escalation rate input (default 3%/yr) affects all projections live.
+
+═══════════════════════════════════════
+STEP 4: PROPOSAL PREVIEW & SEND
+═══════════════════════════════════════
+Split screen: left = edit panel (all details editable), right = PDF preview
+
+PDF is generated client-side using @react-pdf/renderer (react-pdf):
+Create /frontend/src/components/proposal/ProposalPDF.tsx — a full PDF template:
+
+PAGE 1 — Cover:
+  - Company logo + name (Slar) top right
+  - "Solar Installation Proposal" heading
+  - Customer name, address, date
+  - System size highlight: "X kW Rooftop Solar System"
+  - 3D roof screenshot (captured from Three.js renderer using gl.domElement.toDataURL())
+
+PAGE 2 — Site Analysis:
+  - Satellite map screenshot (Leaflet map .toDataURL() from canvas)
+  - Roof polygon highlighted
+  - Shading analysis heatmap (if run)
+  - Obstruction callouts
+
+PAGE 3 — System Specifications:
+  - Panel spec table: brand, model, wattage, count, warranty
+  - Inverter spec table: brand, model, capacity, warranty
+  - String configuration: X strings × Y panels
+  - Performance Ratio: X%
+  - System layout: top-view panel placement image
+
+PAGE 4 — Energy Production:
+  - Monthly generation bar chart (12 months, kWh)
+  - Annual generation: X,XXX kWh/year
+  - Annual savings: ₹X,XXX/month (average)
+  - CO2 savings badge
+
+PAGE 5 — Financial Summary:
+  - Cost breakdown table
+  - Subsidy slab breakdown table  
+  - Net cost
+  - If loan: EMI table
+  - Payback + IRR + lifetime savings (big KPI cards)
+  - 25-year projection chart (simplified)
+
+PAGE 6 — Payment Schedule:
+  - Milestone table: Booking (X%), Material Delivery (X%), Installation Start (X%), Commissioning (X%)
+  - Due dates (left blank for manual fill)
+
+PAGE 7 — Terms & Warranty:
+  - Panel warranty: 25 years performance + 10 years product
+  - Inverter warranty: 5 years
+  - Installation warranty: 1 year workmanship
+  - Company terms (configurable in admin)
+
+SEND CONTROLS:
+  - "Save Draft" button (saves proposal to DB as DRAFT)
+  - "Download PDF" (client-side download)
+  - "Send to Customer" button:
+    → Modal shows: WhatsApp preview + Email preview
+    → Single "Send Both" button
+    → Backend call: POST /api/proposals/:id/send
+    → Success: "Proposal sent! Customer will receive on WhatsApp and email."
+  - "Mark as Accepted" button (updates status → triggers deal-close flow from Phase 5)
+
+#step 10
+Build proposal versioning, comparison tools, and the admin configuration for the solar engine.
+
+═══════════════════════════════════════
+PROPOSAL VERSIONING (Backend)
+═══════════════════════════════════════
+
+A lead/customer can have multiple proposals (e.g. 3kW vs 5kW options, or revised after negotiation).
+
+Add to SolarProposal table: versionNumber (int, auto-increment per lead), isActive (boolean), parentProposalId (nullable FK to SolarProposal for revisions)
+
+ENDPOINTS:
+POST /api/proposals — creates version 1 for lead, or increments version
+GET /api/proposals/lead/:leadId — returns all versions, newest first
+POST /api/proposals/:id/revise — creates a copy as new version with DRAFT status
+POST /api/proposals/:id/accept — marks as ACCEPTED, marks all other versions SUPERSEDED
+  Accepted proposals are LOCKED — no edits allowed
+  Triggers deal-close flow (Phase 5)
+POST /api/proposals/compare — accepts array of proposalIds, returns side-by-side comparison data
+
+
+═══════════════════════════════════════
+PROPOSAL COMPARISON UI
+═══════════════════════════════════════
+
+Component: ProposalComparison.tsx
+  - Shows 2–3 proposals side by side in columns
+  - Rows: System Size | Panel Brand | Panel Count | Inverter | Total Cost | Subsidy | Net Cost | EMI | Payback | 25yr Savings | Annual Generation
+  - Highlighted cells: best value in green (highest savings, lowest payback, etc.)
+  - "Send Comparison to Customer" button → generates comparison PDF (same template, side-by-side table format)
+  - Customer can reply "Option A" / "Option B" via WhatsApp (tracked in call log)
+
+
+═══════════════════════════════════════
+ADMIN CONFIG: SOLAR ENGINE SETTINGS
+═══════════════════════════════════════
+
+Route: /admin/solar-config
+
+PRODUCT DATABASE TABS:
+
+Tab 1 — Solar Panels:
+  Table: Brand | Model | Wattage | Voc | Vmpp | Isc | Impp | TempCoeffVoc | Efficiency | Length | Width | DCR | Active
+  Add/Edit panel modal with all fields
+  Import from Excel button (upload panel datasheet in standard format)
+  Toggle active/inactive (inactive panels won't show in proposal dropdown)
+
+Tab 2 — Inverters:
+  Same table structure for inverter specs
+  Add/Edit modal
+
+Tab 3 — Pricing:
+  Per-watt price per panel brand (overridable per proposal)
+  Default installation cost per kW
+  Default structure cost per kW
+  Default cable + accessories cost per kW
+  Salesperson can edit these per proposal but admin sets defaults
+
+Tab 4 — Subsidy Slabs:
+  PM Surya Ghar: editable slab table (kW range → ₹/kW or flat amount)
+  Delhi CM Scheme: same
+  Other state schemes: add custom schemes (future use)
+  "Effective from" date per slab set
+
+Tab 5 — Proposal Template:
+  Company logo upload (used in PDF cover)
+  Company tagline
+  Terms & warranty text (rich text editor)
+  Payment milestone percentages (Booking %, Delivery %, Installation %, Commissioning %)
+  Footer text for proposal PDF
+
+
+═══════════════════════════════════════
+PROPOSAL ANALYTICS (Project Head / Admin)
+═══════════════════════════════════════
+
+GET /api/proposals/analytics:
+  - Total proposals generated (this month / all time)
+  - Proposals sent (%)
+  - Proposals accepted (conversion rate)
+  - Average system size (kW)
+  - Average deal value (₹)
+  - Most popular panel brand (by count)
+  - Most popular system size bucket (1–2kW, 2–3kW, 3–5kW, 5–10kW, >10kW)
+  - Average time from proposal sent → accepted (days)
+
+Show on Project Head dashboard as a "Proposals" tab section.
+Show full analytics on Admin reports page.
+
+#step 11
+Build the deal-closing flow, invoice generation system, and customer creation pipeline.
+
+DEAL CLOSING FLOW (/backend/src/services/deal.service.ts):
+
+async function closeDeal(leadId: string, proposalId: string, userId: string): Promise<Customer>
+1. Validate lead status and proposal are in acceptable state
+2. Generate customerCode: CUST-{YEAR}-{padded sequential number}
+3. Create Customer record from lead + proposal data
+4. Generate Invoice: INV-{YEAR}-{sequential}
+   - Line items from proposal: panels (unit price × count), inverter, structure, installation charges, misc
+   - GST calculation (18% on applicable items, 12% on panels per GST rules)
+   - Subsidy deduction line item (negative)
+   - Net payable
+5. Generate PDF invoice using Puppeteer:
+   - Company letterhead with logo
+   - GST invoice format with HSN codes (panels: 85414011, inverter: 85044090, structure: 7308)
+   - Customer GSTIN field
+   - QR code for UPI payment (generate using qrcode npm package)
+6. Generate Agreement PDF using Puppeteer:
+   - Customer details, system specifications table
+   - Payment schedule (milestone-based: booking %, material delivery %, installation completion %, commissioning %)
+   - Warranty terms (panel 25yr, inverter 5yr, installation 1yr)
+   - Cancellation policy
+   - Digital signature block
+7. Upload both PDFs to S3, store URLs in Document table
+8. Send both PDFs to customer's email + WhatsApp
+9. Assign documentation officer via round-robin (query users with DOCUMENTATION role sorted by fewest active customers, pick first)
+10. Create DocumentationChecklist record
+11. Create all TimelineEvents for this transition
+12. Emit Socket.io event to project head + admin
+
+INVOICE ENDPOINTS:
+- POST /api/invoices/generate/:customerId — generates fresh invoice, returns PDF URL
+- GET /api/invoices/:id
+- GET /api/invoices/customer/:customerId — all invoices
+- POST /api/invoices/:id/send — resend to customer (email + WhatsApp)
+
+PAYMENT ENDPOINTS:
+- GET /api/payments/customer/:customerId
+- POST /api/payments — record a payment
+  { customerId, invoiceId, amount, mode, transactionRef, milestone, notes }
+  Updates invoice paidAmount/dueAmount/status
+  Creates TimelineEvent
+  Notifies accountant + project head
+- PUT /api/payments/:id — edit (admin/accountant only)
+
+In /frontend, build the Deal Closing modal in the salesperson's lead detail:
+- Step 1: Confirm selected proposal (dropdown if multiple)
+- Step 2: Review auto-generated invoice line items (editable quantities/prices)
+- Step 3: Preview invoice PDF (react-pdf)
+- Step 4: Confirm & Send — triggers backend, shows success with customer ID
+- Confetti animation on success
+- Customer ID displayed prominently with copy button
+- "Go to Customer Page" button
+
+#step 12
+Build the comprehensive customer page at /frontend/src/pages/customer/CustomerPage.tsx. This is the most important page in the CRM — accessible by all roles (read-only for some, full edit for others based on role).
+
+PAGE LAYOUT:
+- Fixed left sidebar (240px) with customer info card + quick stats + team assignment
+- Main content area with tabs
+- Right panel (280px, collapsible) with quick actions + upcoming visits + payment due
+
+LEFT SIDEBAR:
+Customer card: avatar initials circle, name (large), customer ID (amber badge, clickable to copy), phone (click to call), email, address.
+Status timeline dot (New → Documentation → Site Survey → Procurement → Dispatch → Installation → Complete) — current stage highlighted.
+Team section: shows Salesperson, Documentation Officer, Installation Lead, Accountant assigned — each with avatar + name + phone.
+Quick stats: Total amount, Paid, Outstanding (in colored metric cards).
+
+MAIN TABS (antd Tabs):
+
+1. Overview — Key info at a glance: solar system specs, documents uploaded checklist (✓/✗ for each doc type), subsidy status badges, installation date (if set), last visit summary.
+
+2. Timeline — Vertical feed (newest first) of ALL events: call logs (with disposition icon), visit check-ins (with GPS coordinates), form submissions, document uploads, payment records, status changes, assignments, notifications sent. Each event shows: icon, description, performed by (avatar + name), timestamp. Filterable by event type.
+
+3. Proposals — List of all SolarProposal records. Each expandable to show: system specs, financial summary, Arka360 link, PDF download. Status badge (Draft/Sent/Accepted/Rejected). "Generate New Proposal" button.
+
+4. Visits — All visits chronologically. Each shows: type, date, who conducted, check-in status (with coordinates), form data summary if filled, photos uploaded. "Schedule New Visit" button.
+
+5. Documents — Grid of document cards grouped by type. Each card: thumbnail (or icon for PDFs), type label, upload date, uploaded by, download button. Bulk download ZIP button. Upload new document button.
+
+6. Payments — Payment schedule table: milestone name, due date, expected amount, received date, received amount, transaction ref, status badge. "Record Payment" button (accountant/admin only). Payment history chart (Recharts stacked bar: paid vs outstanding per milestone). "Generate Invoice" button → preview modal → send.
+
+7. Documentation — Shows DocumentationChecklist with interactive status updates (documentation team can update, others read-only). Each item has status selector + application number input + upload proof button. Overall completion percentage ring chart.
+
+8. Installation — Site survey data (if conducted): roof details, panel placement, BOM table. BOM items with stock status badges (green=in stock, red=out of stock, amber=dispatched). "Request Dispatch" button (only enabled when all BOM items green).
+
+RIGHT PANEL:
+"Generate & Send Invoice" — prominent button, single click, sends to WhatsApp + email.
+Upcoming visit card (next scheduled visit with countdown).
+Payment due alert (if any invoice overdue).
+Quick note input (saves to timeline).
+
+#step 13
+Build the Documentation team module:
+
+BACKEND:
+Round-robin assignment service (/backend/src/services/round-robin.service.ts):
+function assignDocumentationOfficer(dealerId?: string): Promise<User>
+- Get all active DOCUMENTATION role users (filtered by dealerId)
+- Exclude users on leave (isActive=false)
+- Count active assigned customers for each
+- Pick the one with fewest (ties broken alphabetically by name for determinism)
+- Return User
+
+Assignment is called during deal closing (Phase 5). Add manual reassignment endpoint:
+PATCH /api/customers/:id/assign-documentation — admin/project-head only
+
+DOCUMENTATION CHECKLIST ENDPOINTS:
+- GET /api/documentation/my-customers — returns assigned customers with checklist completion % for logged-in documentation officer
+- GET /api/documentation/checklist/:customerId — full checklist
+- PATCH /api/documentation/checklist/:customerId — update one or more fields:
+  Body can include: { pmSuryaAppNo, pmSuryaStatus, cmSchemeApplicable, cmSchemeAppNo, cmSchemeStatus, loanApplicable, loanAppNo, loanStatus, netMeteringAppNo, netMeteringStatus }
+  - Only DOCUMENTATION, PROJECT_HEAD, ADMIN can call this
+  - Each update creates a TimelineEvent
+  - When ALL applicable items are APPROVED/COMPLETED, emit notification to project head + installation team
+
+DOCUMENT DOWNLOAD ENDPOINTS:
+- GET /api/documents/customer/:customerId/download-all — generates S3 pre-signed ZIP of all documents (use archiver npm package)
+- GET /api/documents/:id/download — S3 pre-signed URL (1hr expiry)
+
+FRONTEND (/frontend/src/pages/documentation/):
+
+DASHBOARD:
+- Summary cards: My customers total, Complete, In Progress, Overdue (>7 days since assigned with no update)
+- Progress ring charts per scheme category across all my customers
+- Overdue customers highlighted in red section
+
+MY CUSTOMERS PAGE:
+- List view with per-customer overall completion % (progress bar)
+- Filter by: completion status, scheme type, date assigned
+- Sort by: name, date, completion %
+
+CUSTOMER CHECKLIST VIEW (opens in drawer):
+Each checklist item as an expandable card:
+  - PM Surya Ghar: Application No. input + status dropdown + Upload proof button + notes. Green checkmark when APPROVED.
+  - CM Scheme: show/hide toggle (if applicable), same fields
+  - Loan: show/hide, application no., status progresses SUBMITTED→SANCTIONED→DISBURSED
+  - Net Metering: application no. + status
+- One-click download buttons for Aadhaar / Electricity Bill / Agreement at top
+- "Completion" ring chart updates in real-time as fields are filled
+
+#step 14
+Build the Installation team module:
+
+BACKEND:
+SITE SURVEY ENDPOINTS:
+- GET /api/installation/my-customers — customers assigned to logged-in installer where documentation is complete (all green)
+- POST /api/site-surveys — create site survey after check-in
+  Body: { customerId, visitId, roofDimensions: {length, width, type}, roofType, shadowAnalysis, panelCount, inverterCount, inverterModel, structureDetails, cableLength, earthingRequired, specialNotes, items: [{itemName, sku, category, quantity, unit}] }
+  - Creates SiteSurvey record
+  - Creates BOMItem records linked to survey + customer
+  - Sends notification to warehouse team (new BOM arrived)
+  - Updates Visit status to COMPLETED
+  - Creates TimelineEvent
+
+- GET /api/site-surveys/:customerId — get survey data
+- PUT /api/site-surveys/:id — update (before dispatch only)
+
+BOM MANAGEMENT:
+- GET /api/bom/:customerId — BOM items with stock status (joins StockItem to show available qty)
+- PATCH /api/bom/item/:id — update item details
+
+INSTALLATION ENDPOINTS:
+- POST /api/installation/:customerId/complete — marks installation done
+  - Sets Customer status to INSTALLATION_DONE
+  - Triggers final payment milestone notification to accountant + customer
+  - Creates TimelineEvent
+  - If final payment already cleared → sets status to COMPLETED
+
+FRONTEND (/frontend/src/pages/installation/):
+
+DASHBOARD:
+- Cards: Pending site surveys, Pending installations, Today's visits, Completed this month
+- Route map (same as salesperson — Leaflet, today's visits in order)
+
+MY CUSTOMERS:
+Two tabs: "Site Survey Pending" and "Installation Pending"
+Customer cards with:
+- Address + distance from current location
+- Days since assignment
+- "View Customer" and "Schedule Visit" buttons
+
+SITE SURVEY FORM (opens after check-in on visit):
+Section 1 — Roof Details:
+- Roof type selector with visual icons
+- Dimensions inputs (length × width per section, add multiple sections)
+- Total usable area auto-calculated
+- Shadow-free area input
+- Roof age + condition
+
+Section 2 — System Sizing:
+- Panel count (editable, auto-suggested from proposal)
+- Panel placement diagram — interactive grid where installer marks which roof cells get panels
+- Inverter count + model
+- String configuration (panels per string)
+
+Section 3 — BOM Builder:
+- Dynamic table: add rows for each material
+- Category selector (Panel, Inverter, Structure, Cable, Accessory, Other)
+- Item name, SKU, quantity, unit
+- Pre-fill from proposal if available
+- "Add Row" button
+
+Section 4 — Notes + Photos:
+- Special instructions textarea
+- Multiple site photo uploads (up to 20 photos)
+- "Submit Survey" button — sends to warehouse
+
+INSTALLATION COMPLETE SCREEN:
+- Checklist: all panels installed ✓, inverter running ✓, grid connected ✓, customer demo given ✓, commissioning report uploaded
+- Photo upload of completed installation
+- "Mark Installation Complete" button
+
+
+#step 15
+Build the complete Warehouse module:
+
+BACKEND:
+STOCK ENDPOINTS:
+- GET /api/warehouse/stock — all items with current quantity, low-stock flag
+- POST /api/warehouse/stock — add new stock item (name, SKU, category, threshold)
+- PUT /api/warehouse/stock/:id — update item details + threshold
+- POST /api/warehouse/stock/:id/transaction — stock in or out
+  Body: { type: 'IN'|'OUT'|'ADJUSTMENT', quantity, reference, notes, customerId (for OUT) }
+  Validates: OUT quantity ≤ current stock
+  Creates StockTransaction record
+  If new qty < lowStockThreshold: creates Notification for WAREHOUSE + ADMIN
+
+PIPELINE ENDPOINTS:
+- GET /api/warehouse/pipeline — all customers with BOM submitted, grouped by:
+  READY_TO_DISPATCH: all items in stock
+  PARTIAL: some items in stock
+  BLOCKED: items out of stock
+  Each customer shows BOM items with: itemName, required qty, available qty, status (green/red)
+- POST /api/warehouse/dispatch/:customerId — DISPATCH action
+  Pre-condition: ALL BOM items must have sufficient stock
+  If not all green: returns 400 with which items are blocking
+  If all green:
+    Atomically deducts all BOM quantities from StockItem
+    Creates StockTransaction records for each item (type=OUT, reference=customerId)
+    Creates Dispatch record
+    Updates BOMItem status to DISPATCHED
+    Notifies installation team
+    Creates TimelineEvent on customer
+    Returns dispatch summary
+
+STOCK ALERTS ENDPOINT:
+- GET /api/warehouse/alerts — items below threshold, items with zero stock, customers blocked by stockouts
+
+FRONTEND (/frontend/src/pages/warehouse/):
+
+DASHBOARD:
+- Stock health summary: X items in stock, Y items low, Z items out of stock (traffic light style)
+- Pending dispatches count
+- Today's dispatched count
+- Recent transactions feed
+
+STOCK INVENTORY PAGE (5 tabs: All, Panels, Inverters, Structure, Cables & Accessories):
+- Table: SKU | Name | Category | Qty | Unit | Threshold | Status | Actions
+- Status badge: In Stock (green) / Low Stock (amber, shows qty) / Out of Stock (red)
+- Row actions: Stock In (opens modal), Stock Out, View History
+- Search + filter
+- Export to Excel button
+
+STOCK TRANSACTION MODAL:
+- Type toggle: IN / OUT / Adjustment
+- Quantity input
+- Reference (invoice number for IN, customer ID for OUT)
+- Notes
+- Preview: current stock → new stock
+
+PIPELINE PAGE:
+- Three column layout: Ready to Dispatch | Partial Stock | Blocked
+- Customer cards showing: name, customer ID, total BOM items, ready items, blocked items list with missing quantities
+- "Dispatch" button on Ready cards (green, prominent)
+- Dispatch confirmation modal: lists all items being deducted with quantities
+- One-click dispatch with success animation
+
+STOCK HISTORY PAGE:
+- Timeline of all transactions: date, item, qty (+/-), type, reference, who performed
+- Filter by: item, type, date range, customer
+
+
+#step 16
+Build the Accountant module:
+
+BACKEND:
+FINANCIAL SUMMARY ENDPOINTS:
+- GET /api/accounts/summary — { totalRevenue, thisMonthCollected, totalOutstanding, overdueCount, overdueAmount, avgDealValue, totalCustomers }
+- GET /api/accounts/receivables — all customers with outstanding amounts, grouped by: overdue (>due date), due this week, due this month, future
+- GET /api/accounts/monthly-collection — last 12 months collection amounts (for chart)
+- GET /api/accounts/customer/:customerId/financial — full payment history + invoice list + outstanding
+
+INVOICE MANAGEMENT:
+- GET /api/invoices — all invoices with filters: status, customer, date range
+- PATCH /api/invoices/:id — update line items, due date (draft only)
+- POST /api/invoices/:id/mark-overdue — manual override if needed
+
+PAYMENT REPORTING:
+- GET /api/payments/report — payment list with filters
+- GET /api/payments/export — CSV export of payment history
+
+FRONTEND (/frontend/src/pages/accountant/):
+
+DASHBOARD:
+- KPI cards row: Total collected this month, Outstanding, Overdue, Pipeline value (accepted proposals not yet invoiced)
+- Monthly collection bar chart (Recharts, 12 months)
+- Collection by milestone donut chart
+- Top 5 overdue customers list with amount + days overdue + quick "Call" button
+
+RECEIVABLES PAGE:
+- Tabbed: Overdue | Due This Week | Due This Month | All
+- Table: Customer | Customer ID | Invoice No | Amount | Due Date | Days Overdue | Status | Actions
+- Action: Record Payment (opens modal), Send Reminder (sends WhatsApp + email), View Customer
+- Bulk send reminder button
+
+RECORD PAYMENT MODAL:
+- Customer name + invoice pre-filled
+- Milestone selector (Booking / First Installment / Second / Final / Custom)
+- Amount input (shows outstanding amount as reference)
+- Payment date picker
+- Mode: Cash / NEFT / RTGS / UPI / Cheque
+- Transaction reference input
+- Notes
+- Receipt PDF generated on save, emailed to customer
+
+PAYMENT HISTORY PAGE:
+- Searchable table of all payments ever recorded
+- Filter by: date range, mode, milestone, customer
+- Export CSV button
+
+INVOICE CENTER:
+- All invoices with status badges
+- Generate new invoice button (customer picker → system generates)
+- Bulk send to all pending/overdue customers
+
+
+#step 17
+Build the Project Head module:
+
+BACKEND:
+ESCALATION SERVICE (/backend/src/services/escalation.service.ts):
+
+Run as a BullMQ cron job every hour:
+1. Query all active customers with status != COMPLETED
+2. For each customer, find the latest TimelineEvent for the current stage
+3. Calculate delay = now - lastEventAt in days
+4. If delay > 2 days AND no existing unresolved EscalationLog for this customer+stage:
+   - Create EscalationLog
+   - Send in-app notification + email to PROJECT_HEAD
+   - Notify the assigned team member
+5. If delay > 4 days AND no admin notification yet:
+   - Update EscalationLog
+   - Send notification to ADMIN
+6. When stage changes (new TimelineEvent), mark previous EscalationLog as resolved
+
+ENDPOINTS:
+- GET /api/project-head/kanban — all customers grouped by stage with delay flags
+- GET /api/project-head/escalations — unresolved escalations with customer details
+- GET /api/project-head/team-performance — per user: assigned count, completed count, avg completion time, overdue count
+- GET /api/project-head/customer/:id/progress — full progress with each stage timing
+- POST /api/project-head/reassign — reassign any role on a customer
+- GET /api/project-head/reports — weekly/monthly performance summaries
+
+FRONTEND (/frontend/src/pages/project-head/):
+
+DASHBOARD:
+- Escalation inbox at top (red/amber cards): X tasks delayed >4 days, Y tasks delayed 2–4 days
+- Stage health bar: each pipeline stage with customer count + overdue count
+- Team workload chart (Recharts grouped bar): each team member, assigned vs completed
+- Revenue pipeline: accepted proposals total value, invoiced total, collected total (funnel chart)
+
+KANBAN BOARD (/project-head/kanban):
+- Columns: Documentation → Site Survey → Procurement → Dispatch → Installation → Complete
+- Customer cards: name, ID, assigned team member, days in current stage, delay badge (amber=2d, red=4d+)
+- Clicking card opens customer page in side panel
+- Filter by: zone, team member, delay status
+- Sort by: days in stage, customer name, amount
+
+TEAM PERFORMANCE (/project-head/team):
+- Toggle between: Salesperson | Documentation | Installation
+- Per-person stats cards: name, active count, completed this month, avg days to complete, overdue
+- Clicking opens person's assigned customer list
+- Leaderboard style ranking with performance scores
+
+ESCALATION LOG (/project-head/escalations):
+- List of all active escalations with: customer, stage, delay days, assigned person, last action
+- "Add Note" button (creates TimelineEvent)
+- "Mark Resolved" button
+- Filter: severity (2d+ / 4d+), stage, team member
+
+#step 18
+Build the Admin module:
+
+BACKEND:
+USER MANAGEMENT ENDPOINTS (ADMIN only):
+- GET /api/admin/users — all users with role, zone, active status, last login
+- POST /api/admin/users — create user (hashed password, send welcome email with temp password)
+- PUT /api/admin/users/:id — update name, email, phone, role, zoneId, dealerId, isActive
+- DELETE /api/admin/users/:id — soft delete: set isActive=false, reassign their active tasks
+  Body: { reassignSalespersonId, reassignDocId, reassignInstallerId } for task redistribution
+- POST /api/admin/users/:id/reset-password — sends new temp password to user email
+
+DEALER MANAGEMENT:
+- GET /api/admin/dealers — all dealers with user count, customer count, revenue
+- POST /api/admin/dealers — create dealer + auto-create dealer admin user
+- PUT /api/admin/dealers/:id — update details, isActive
+- DELETE /api/admin/dealers/:id — deactivates dealer + all sub-users
+
+SYSTEM CONFIG ENDPOINTS:
+- GET/PUT /api/admin/config — system-wide settings:
+  { companyName, companyLogo, gstNumber, address, whatsappEnabled, emailEnabled, escalation2DayEnabled, escalation4DayEnabled, defaultPaymentTerms, subsidySlabs (JSON) }
+
+ZONE MANAGEMENT:
+- Full CRUD for zones (already in Phase 3, expose to admin UI)
+
+AUDIT LOG:
+- GET /api/admin/audit — all significant actions: user created/deleted, role changed, config changed, payment recorded, customer reassigned. With actor, action, target, timestamp, IP.
+
+SYSTEM HEALTH:
+- GET /api/admin/health — DB connection, Redis connection, queue depths, failed jobs, S3 connectivity
+
+FRONTEND (/frontend/src/pages/admin/):
+
+DASHBOARD:
+- System-wide KPIs: Total users, Total customers, Total revenue, Active campaigns, Storage used
+- Role distribution donut chart
+- Daily activity chart (logins, leads created, customers created, payments recorded)
+- Recent audit log feed
+- System health panel (green/red indicators for all services)
+
+USER MANAGEMENT (/admin/users):
+- Table: Avatar | Name | Role | Zone | Last Login | Status | Actions
+- Role badges color-coded
+- Create User button → multi-step modal (details → role → zone/dealer assignment → send invite)
+- Edit in-line drawer
+- Deactivate with task reassignment flow
+
+TEAM ARCHITECTURE (/admin/team):
+- Visual org tree built with antd Tree component:
+  Admin
+  ├── Project Head
+  │   ├── Calling Staff (with lead count badge)
+  │   ├── Salesperson (with zone badge)
+  │   ├── Documentation (with assigned count)
+  │   ├── Installation (with zone)
+  │   ├── Warehouse
+  │   └── Accountant
+  └── Dealer Admin (expandable sub-tree with their staff)
+- Clicking any node shows: their stats panel on the right
+- Drag-and-drop for zone reassignment (admin only)
+
+DEALER MANAGEMENT (/admin/dealers):
+- Cards for each dealer: company name, admin name, staff count, customer count, revenue
+- Expand card to see their staff list
+- Create Dealer flow: company details → admin user creation → send welcome kit
+- Toggle active/inactive
+
+SYSTEM SETTINGS (/admin/settings):
+- Company profile (logo upload, name, GST, address)
+- Notification settings (toggle channels per notification type)
+- Zone editor (Leaflet map with editable polygon zones — draw mode)
+- Payment terms templates
+- Subsidy slab editor (PM Surya Ghar slabs editable table)
+
+AUDIT TRAIL (/admin/audit):
+- Immutable log table with export
+
+#step 19
+Build the complete notification system:
+
+NOTIFICATION SERVICE (/backend/src/services/notification.service.ts):
+
+async function sendNotification(input: NotificationInput): Promise<void>
+where NotificationInput = {
+  userId: string,           // recipient
+  type: NotificationType,  // enum of all notification types
+  title: string,
+  message: string,
+  entityType?: string,
+  entityId?: string,
+  channels: ('IN_APP' | 'WHATSAPP' | 'EMAIL')[],
+  whatsappData?: { phone: string, templateName: string, variables: string[] },
+  emailData?: { to: string, subject: string, html: string }
+}
+
+Implementation:
+1. Always: create Notification record in DB
+2. Always: emit Socket.io event to user's personal room (room = userId):
+   socket.to(userId).emit('notification', notificationPayload)
+3. If WHATSAPP in channels: call Meta Cloud API with approved template
+4. If EMAIL in channels: call SendGrid with template
+
+NOTIFICATION TYPES ENUM (create all of these):
+FOLLOW_UP_DUE, CAMPAIGN_STARTED, CAMPAIGN_COMPLETED, NEW_LEAD_ASSIGNED, VISIT_SCHEDULED, VISIT_REMINDER_1HR, CHECKIN_REMINDER, NEW_CUSTOMER_ASSIGNED, CHECKLIST_UPDATED, CHECKLIST_COMPLETE, PAYMENT_DUE, PAYMENT_RECEIVED, INVOICE_SENT, INVOICE_OVERDUE, LOW_STOCK_ALERT, BOM_RECEIVED, DISPATCH_READY, DISPATCHED, INSTALLATION_COMPLETE, TASK_DELAY_2D, TASK_DELAY_4D, PROPOSAL_SENT, PROPOSAL_ACCEPTED, DEALER_CREATED, USER_CREATED, SYSTEM_ALERT
+
+SCHEDULED NOTIFICATIONS (BullMQ cron):
+- Follow-up reminders: every 15 minutes, check for RawLeads/Leads with followUpAt in next 30 mins, send to assigned calling staff/salesperson
+- Visit reminders: 1 hour before each scheduled visit to the assigned field staff
+- Invoice due: at 9am daily, check invoices due tomorrow, notify accountant + customer
+- Escalation checker: every hour (from Phase 9)
+
+WHATSAPP TEMPLATES needed (create in Meta Business Manager):
+- visit_confirmation: "Hi {{1}}, your solar consultation is scheduled on {{2}} at {{3}}. Address: {{4}}"
+- invoice_sent: "Hi {{1}}, your invoice {{2}} for ₹{{3}} has been generated. Download: {{4}}"
+- payment_received: "Hi {{1}}, we received ₹{{2}} on {{3}}. Receipt: {{4}}"
+- proposal_ready: "Hi {{1}}, your solar proposal is ready. View: {{2}}"
+
+FRONTEND:
+- Bell icon in all role navbars with unread count badge (red dot if >0)
+- Notification dropdown: grouped by today/yesterday/older, each with icon, title, message, time, entity link
+- "Mark all read" button
+- "View all" navigates to /notifications page
+- Full notifications page: searchable, filterable by type, date range
+- Socket.io client in App.tsx: on 'notification' event, update Zustand notifications store + show antd notification toast
+
+#step 20
+Build the dealer portal as a completely scoped sub-CRM:
+
+BACKEND:
+All existing API endpoints already support dealerScope middleware (from Phase 1). Ensure every query that touches leads, customers, campaigns, users filters by req.user.dealerId when set.
+
+Dealer-specific endpoints:
+- GET /api/dealer/dashboard — dealer's own summary stats (leads, customers, revenue, team count)
+- GET /api/dealer/team — dealer's staff (users with matching dealerId)
+- POST /api/dealer/team — create staff member under dealer (cannot create other DEALER_ADMIN)
+  Allowed roles for dealer to create: CALLING_STAFF, SALESPERSON, DOCUMENTATION, INSTALLATION, WAREHOUSE, ACCOUNTANT
+- PUT /api/dealer/team/:userId — update their staff (same scope restriction)
+- DELETE /api/dealer/team/:userId — deactivate only (not delete, main admin can delete)
+
+Dealer CANNOT access:
+- /api/admin/* routes
+- Other dealers' data
+- Main company data
+- Zone management
+
+FRONTEND:
+The dealer logs in and sees the EXACT SAME module pages as the main company BUT:
+- Top navbar shows dealer company name + logo (fetched from Dealer record)
+- "Add Dealer" option hidden from user management
+- All data scoped to dealer
+- A "My Company" settings page instead of admin system settings
+- Can customise their own company logo, GST, contact details
+
+Implementation approach: create a DealerContext in React. When user.role === DEALER_ADMIN, render DealerLayout wrapper instead of MainLayout. DealerLayout has slightly different navigation (no admin panel, no zone editor, no other dealers). All API calls automatically include dealerId via the authenticated JWT (backend handles the scoping). So the same React pages/components reuse for dealer with minimal changes — just the navigation differs.
+
+Dealer Dashboard:
+- Same structure as Admin dashboard but scoped to dealer data
+- No system health panel
+- No audit trail for system-level actions
+- Shows: their customers, their team performance, their revenue, their pipeline
+
+
+#step 21
+Build and polish all 9 role-specific dashboards. Each dashboard is the first screen after login. Use Recharts for all charts. All cards use TanStack Query with 30-second refetch intervals for live data.
+
+CALLING STAFF DASHBOARD (already built in Phase 2 — polish and add):
+- Live campaign progress bar (Socket.io updates)
+- "Today's Follow-ups" countdown timer to next due follow-up
+- Conversion funnel: Total contacted → Interested → Follow-up → Converted (horizontal funnel, Recharts FunnelChart)
+- Quick dial section: first 5 overdue follow-ups with "Start Call" button that logs the call in one click
+
+SALESPERSON DASHBOARD (already built in Phase 3 — add):
+- Weekly performance vs last week (Recharts sparklines)
+- Zone map thumbnail showing their territory (Leaflet, non-interactive)
+- "Distance traveled today" counter (summed from check-in GPS logs)
+- Closest unvisited lead (distance + name)
+
+PROJECT HEAD DASHBOARD (already built in Phase 9 — add):
+- Real-time pipeline health (Socket.io pushes when any customer changes stage)
+- SLA compliance rate: % of customers completed within target days per stage
+
+DOCUMENTATION DASHBOARD:
+- Gantt-style progress bars per scheme category
+- "Overdue since N days" banner at top if any
+
+INSTALLATION DASHBOARD:
+- Today's visits map (full-width Leaflet)
+- Material readiness per upcoming installation
+- Weather widget for Delhi (OpenWeatherMap API) — relevant for installation planning
+
+WAREHOUSE DASHBOARD:
+- Live stock alerts (Socket.io on low-stock triggers)
+- Pipeline dispatch readiness: % of pending customers with full stock
+- Top 10 most-needed out-of-stock items
+
+ACCOUNTANT DASHBOARD:
+- Cash flow chart: expected vs received per month (Recharts ComposedChart)
+- Outstanding aging report: 0-30d / 30-60d / 60-90d / 90d+ (pie chart)
+
+ADMIN DASHBOARD:
+- Real-time system metrics
+- Active users online right now (Socket.io presence tracking)
+- Revenue by source (direct vs dealer vs zone) — Recharts PieChart
+
+All dashboards:
+- Skeleton loaders while data fetches (antd Skeleton)
+- Empty states with helpful CTAs
+- Responsive: collapses to single column on mobile
+- Dark mode support (antd ConfigProvider with algorithm: theme.darkAlgorithm)
+

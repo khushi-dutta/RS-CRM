@@ -1,0 +1,17 @@
+﻿node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+target/
+*.log
+graphify-out/
+@
+*.txt
+.kiro/
+.claude/
+.vscode/
+.github/
+*.out
+

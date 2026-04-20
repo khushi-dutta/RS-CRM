@@ -1,0 +1,1045 @@
+generator client {
+  provider        = "prisma-client-js"
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+}
+
+enum RoleType {
+  ADMIN
+  CALLING_STAFF
+  SALESPERSON
+  PROJECT_HEAD
+  DOCUMENTATION
+  WAREHOUSE
+  INSTALLATION
+  ACCOUNTANT
+  DEALER_ADMIN
+  DEALER_STAFF
+}
+
+enum CampaignType {
+  WHATSAPP
+  EMAIL
+  BOTH
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+}
+
+enum LeadSource {
+  CAMPAIGN
+  EXCEL_UPLOAD
+  MANUAL
+}
+
+enum RawLeadStatus {
+  NEW
+  CALLED
+  FOLLOW_UP
+  INTERESTED
+  NOT_INTERESTED
+  CALL_NOT_RECEIVED
+  WRONG_NUMBER
+  CONVERTED
+  DUPLICATE
+}
+
+enum LeadStatus {
+  NEW
+  FOLLOW_UP
+  VISIT_SCHEDULED
+  PROPOSAL_SENT
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum CallEntityType {
+  RAW_LEAD
+  LEAD
+  CUSTOMER
+}
+
+enum CallType {
+  OUTBOUND
+  INBOUND
+}
+
+enum CallDisposition {
+  FOLLOW_UP
+  NOT_INTERESTED
+  CALL_NOT_RECEIVED
+  WRONG_NUMBER
+  INTERESTED
+  OTHER
+}
+
+enum VisitType {
+  SALES_VISIT
+  SITE_SURVEY
+}
+
+enum VisitStatus {
+  SCHEDULED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum ProposalStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  SUPERSEDED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INSTALLATION_DONE
+  COMPLETED
+}
+
+enum DocumentType {
+  AADHAAR_FRONT
+  AADHAAR_BACK
+  ELECTRICITY_BILL
+  CUSTOMER_SIGNATURE
+  SITE_PHOTO
+  AGREEMENT
+  INVOICE
+  OTHER
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
+enum PaymentMode {
+  CASH
+  NEFT
+  RTGS
+  UPI
+  CHEQUE
+}
+
+enum PaymentMilestone {
+  BOOKING
+  FIRST_INSTALLMENT
+  SECOND_INSTALLMENT
+  FINAL
+  OTHER
+}
+
+enum AppStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum LoanStatus {
+  PENDING
+  SUBMITTED
+  SANCTIONED
+  DISBURSED
+  NA
+}
+
+enum BOMCategory {
+  PANEL
+  INVERTER
+  STRUCTURE
+  CABLE
+  ACCESSORY
+  OTHER
+}
+
+enum BOMStatus {
+  PENDING
+  IN_STOCK
+  OUT_OF_STOCK
+  DISPATCHED
+}
+
+enum TxType {
+  IN
+  OUT
+  ADJUSTMENT
+}
+
+enum DispatchStatus {
+  PENDING
+  DISPATCHED
+  DELIVERED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum EscalationStatus {
+  PENDING
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum AICallStatus {
+  PENDING
+  QUEUED
+  CALLING
+  COMPLETED
+  FAILED
+  NO_ANSWER
+  BUSY
+  WRONG_NUMBER
+}
+
+enum AICallDisposition {
+  INTERESTED
+  NOT_INTERESTED
+  CALLBACK
+  WRONG_NUMBER
+  NO_ANSWER
+  VOICEMAIL
+  DO_NOT_CALL
+}
+
+// 1. User
+model User {
+  id               String    @id @default(uuid())
+  email            String    @unique
+  password         String
+  name             String
+  phone            String?
+  role             RoleType
+  dealerId         String?
+  zoneId           String?
+  isActive         Boolean   @default(true)
+  language         String    @default("en")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  lastLoginAt      DateTime?
+  profilePhoto     String?
+
+  dealer           Dealer?   @relation("UserDealer", fields: [dealerId], references: [id])
+  zone             Zone?     @relation(fields: [zoneId], references: [id])
+  
+  // Inverse relations
+  adminDealers     Dealer[]  @relation("DealerAdmin")
+  campaigns        Campaign[]
+  campaignTemplates CampaignTemplate[]
+  rawLeadsAssigned RawLead[]
+  salesLeads       Lead[]    @relation("SalesAssigned")
+  callingLeads     Lead[]    @relation("CallingAssigned")
+  callsMade        CallLog[]
+  visitsAssigned   Visit[]   @relation("VisitAssigned")
+  visitsScheduled  Visit[]   @relation("VisitScheduled")
+  proposalsCreated SolarProposal[]
+  salesCustomers   Customer[] @relation("CustomerSales")
+  docCustomers     Customer[] @relation("CustomerDoc")
+  instCustomers    Customer[] @relation("CustomerInst")
+  accCustomers     Customer[] @relation("CustomerAcc")
+  documents        Document[]
+  invoices         Invoice[]
+  payments         Payment[]
+  docChecklists    DocumentationChecklist[]
+  surveys          SiteSurvey[]
+  stockTx          StockTransaction[]
+  dispatches       Dispatch[]
+  notifications    Notification[]
+  timelineEvents   TimelineEvent[]
+  escalationsAssigned EscalationLog[] @relation("EscalationAssigned")
+  escalationsNotified EscalationLog[] @relation("EscalationNotified")
+  attendanceLogs   AttendanceLog[]
+  tasksCreated     Task[]    @relation("TaskCreator")
+  tasksAssigned    Task[]    @relation("TaskAssignee")
+  
+  // Team hierarchy relations
+  hierarchy        TeamHierarchy? @relation("HierarchyUser")
+  subordinates     TeamHierarchy[] @relation("HierarchySupervisor")
+  
+  // Performance snapshots relation
+  performanceSnapshots PerformanceSnapshot[] @relation("UserPerformanceSnapshots")
+  
+  // AI Voice campaigns
+  aiVoiceCampaigns AIVoiceCampaign[]
+
+  @@index([role])
+  @@index([dealerId])
+  @@index([isActive])
+}
+
+// 2. Dealer
+model Dealer {
+  id               String    @id @default(uuid())
+  companyName      String
+  contactName      String
+  email            String
+  phone            String
+  address          String
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  adminUserId      String?
+
+  adminUser        User?     @relation("DealerAdmin", fields: [adminUserId], references: [id])
+  users            User[]    @relation("UserDealer")
+  campaigns        Campaign[]
+  templates        CampaignTemplate[]
+  rawLeads         RawLead[]
+  leads            Lead[]
+  customers        Customer[]
+  stockItems       StockItem[]
+  aiVoiceCampaigns AIVoiceCampaign[]
+
+  @@index([isActive])
+}
+
+// 3. Zone
+model Zone {
+  id               String    @id @default(uuid())
+  name             String
+  coordinates      Json      // JSON polygon
+  city             String
+  parentZoneId     String?
+
+  parentZone       Zone?     @relation("ParentChildZone", fields: [parentZoneId], references: [id])
+  childZones       Zone[]    @relation("ParentChildZone")
+  users            User[]
+  leads            Lead[]
+  customers        Customer[]
+}
+
+// 4. Campaign
+model Campaign {
+  id               String    @id @default(uuid())
+  name             String
+  type             CampaignType
+  status           CampaignStatus @default(DRAFT)
+  templateId       String
+  createdBy        String
+  dealerId         String?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  totalContacts    Int       @default(0)
+  sent             Int       @default(0)
+  delivered        Int       @default(0)
+  opened           Int       @default(0)
+  failed           Int       @default(0)
+
+  template         CampaignTemplate @relation(fields: [templateId], references: [id])
+  creator          User      @relation(fields: [createdBy], references: [id])
+  dealer           Dealer?   @relation(fields: [dealerId], references: [id])
+  rawLeads         RawLead[]
+
+  @@index([status])
+  @@index([dealerId])
+}
+
+// 5. CampaignTemplate
+model CampaignTemplate {
+  id               String    @id @default(uuid())
+  name             String
+  type             CampaignType
+  subject          String?
+  body             String
+  variables        Json      // JSON array of string
+  createdBy        String
+  dealerId         String?
+
+  creator          User      @relation(fields: [createdBy], references: [id])
+  dealer           Dealer?   @relation(fields: [dealerId], references: [id])
+  campaigns        Campaign[]
+
+  @@index([dealerId])
+}
+
+// 6. RawLead
+model RawLead {
+  id               String    @id @default(uuid())
+  name             String
+  phone            String
+  email            String?
+  address          String?
+  city             String?
+  pincode          String?
+  source           LeadSource
+  campaignId       String?
+  assignedTo       String?
+  status           RawLeadStatus @default(NEW)
+  followUpAt       DateTime?
+  dealerId         String?
+  createdAt        DateTime  @default(now())
+
+  campaign         Campaign? @relation(fields: [campaignId], references: [id])
+  assignee         User?     @relation(fields: [assignedTo], references: [id])
+  dealer           Dealer?   @relation(fields: [dealerId], references: [id])
+  leads            Lead[]
+  timelineEvents   TimelineEvent[]
+  aiVoiceCalls     AIVoiceCall[]
+
+  @@index([status])
+  @@index([assignedTo])
+  @@index([dealerId])
+}
+
+// 7. Lead
+model Lead {
+  id                   String    @id @default(uuid())
+  leadCode             String    @unique
+  rawLeadId            String
+  customerId           String?   
+  name                 String
+  phone                String
+  email                String?
+  address              String?
+  city                 String?
+  pincode              String?
+  lat                  Float?
+  lng                  Float?
+  assignedSalesperson  String
+  assignedCallingStaff String?
+  zoneId               String
+  status               LeadStatus @default(NEW)
+  dealerId             String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  lostReason           String?
+
+  rawLead              RawLead   @relation(fields: [rawLeadId], references: [id])
+  salesperson          User      @relation("SalesAssigned", fields: [assignedSalesperson], references: [id])
+  callingStaff         User?     @relation("CallingAssigned", fields: [assignedCallingStaff], references: [id])
+  zone                 Zone      @relation(fields: [zoneId], references: [id])
+  dealer               Dealer?   @relation(fields: [dealerId], references: [id])
+  
+  // Handled relation loop: Customer has `leadId`, and Lead has `customerId`.
+  // Customer uses `leadId`, so we establish bidirectional relationship without `@unique` conflicts.
+  customer             Customer? @relation("CustomerLeads", fields: [customerId], references: [id])
+  
+  visits               Visit[]
+  proposals            SolarProposal[]
+  documents            Document[]
+  timelineEvents       TimelineEvent[]
+
+  @@index([status])
+  @@index([assignedSalesperson])
+  @@index([assignedCallingStaff])
+  @@index([dealerId])
+  @@index([customerId])
+}
+
+// 8. CallLog
+model CallLog {
+  id               String    @id @default(uuid())
+  entityType       CallEntityType
+  entityId         String
+  calledBy         String
+  callType         CallType
+  disposition      CallDisposition
+  notes            String?
+  followUpAt       DateTime?
+  duration         Int?      // seconds
+  createdAt        DateTime  @default(now())
+
+  caller           User      @relation(fields: [calledBy], references: [id])
+
+  @@index([entityId, entityType])
+}
+
+// 9. Visit
+model Visit {
+  id               String    @id @default(uuid())
+  leadId           String?
+  customerId       String?
+  visitType        VisitType
+  scheduledAt      DateTime
+  scheduledEndAt   DateTime
+  address          String
+  lat              Float?
+  lng              Float?
+  status           VisitStatus @default(SCHEDULED)
+  assignedTo       String
+  scheduledBy      String
+  checkInAt        DateTime?
+  checkInLat       Float?
+  checkInLng       Float?
+  checkInDistance  Float?
+  notes            String?
+  createdAt        DateTime  @default(now())
+
+  lead             Lead?     @relation(fields: [leadId], references: [id])
+  customer         Customer? @relation(fields: [customerId], references: [id])
+  assignee         User      @relation("VisitAssigned", fields: [assignedTo], references: [id])
+  scheduler        User      @relation("VisitScheduled", fields: [scheduledBy], references: [id])
+
+  siteSurveys      SiteSurvey[]
+  attendanceLogs   AttendanceLog[]
+
+  @@index([status])
+  @@index([assignedTo])
+  @@index([leadId])
+  @@index([customerId])
+}
+
+// 10. SolarProposal
+model SolarProposal {
+  id               String    @id @default(uuid())
+  leadId           String
+  customerId       String?
+  createdBy        String
+  arka360ProjectId String?
+  arka360Url       String?
+  systemSizeKw     Float
+  panelBrand       String
+  panelModel       String
+  panelCount       Int
+  panelWattage     Int
+  inverterBrand    String
+  inverterModel    String
+  inverterCapacity Float
+  structureType    String
+  legs             Int?
+  isDCR            Boolean   @default(false)
+  roofType         String
+  annualGeneration Float?
+  co2Savings       Float?
+  totalCost        Float
+  subsidyAmount    Float?
+  subsidyScheme    String?
+  loanApplicable   Boolean   @default(false)
+  loanAmount       Float?
+  loanTenure       Int?
+  emi              Float?
+  netCost          Float
+  status           ProposalStatus @default(DRAFT)
+  sentAt           DateTime?
+  createdAt        DateTime  @default(now())
+  model3dUrl       String?
+
+  // Versioning
+  versionNumber    Int       @default(1)
+  isActive         Boolean   @default(true)
+  parentProposalId String?
+  acceptedAt       DateTime?
+
+  // Public sharing
+  publicToken          String?   @unique
+  publicTokenExpiresAt DateTime?
+  viewCount            Int       @default(0)
+  lastViewedAt         DateTime?
+
+  lead             Lead      @relation(fields: [leadId], references: [id])
+  customer         Customer? @relation(fields: [customerId], references: [id])
+  creator          User      @relation(fields: [createdBy], references: [id])
+  parentProposal   SolarProposal? @relation("ProposalRevisions", fields: [parentProposalId], references: [id])
+  revisions        SolarProposal[] @relation("ProposalRevisions")
+  chatbotConversations ChatbotConversation[]
+
+  @@index([status])
+  @@index([leadId])
+  @@index([isActive])
+  @@index([versionNumber])
+}
+
+// 11. Customer
+model Customer {
+  id                    String    @id @default(uuid())
+  customerCode          String    @unique
+  leadId                String?
+  name                  String
+  phone                 String
+  altPhone              String?
+  email                 String?
+  address               String
+  city                  String
+  pincode               String
+  lat                   Float?
+  lng                   Float?
+  aadhaarNumber         String?
+  electricityConsumerNo String?
+  sanctionedLoad        Float?
+  zoneId                String
+  assignedSalesperson   String
+  assignedDocumentation String?
+  assignedInstallation  String?
+  assignedAccountant    String?
+  dealerId              String?
+  status                CustomerStatus @default(ACTIVE)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  leads                 Lead[]    @relation("CustomerLeads")
+  zone                  Zone      @relation(fields: [zoneId], references: [id])
+  salesperson           User      @relation("CustomerSales", fields: [assignedSalesperson], references: [id])
+  documentationUser     User?     @relation("CustomerDoc", fields: [assignedDocumentation], references: [id])
+  installationUser      User?     @relation("CustomerInst", fields: [assignedInstallation], references: [id])
+  accountantUser        User?     @relation("CustomerAcc", fields: [assignedAccountant], references: [id])
+  dealer                Dealer?   @relation(fields: [dealerId], references: [id])
+
+  visits                Visit[]
+  proposals             SolarProposal[]
+  documents             Document[]
+  invoices              Invoice[]
+  payments              Payment[]
+  docChecklist          DocumentationChecklist?
+  siteSurveys           SiteSurvey[]
+  bomItems              BOMItem[]
+  stockTransactions     StockTransaction[]
+  dispatches            Dispatch[]
+  timelineEvents        TimelineEvent[]
+  escalationLogs        EscalationLog[]
+
+  @@index([status])
+  @@index([dealerId])
+  @@index([assignedSalesperson])
+}
+
+// 12. Document
+model Document {
+  id               String    @id @default(uuid())
+  customerId       String
+  leadId           String?
+  type             DocumentType
+  url              String
+  uploadedBy       String
+  createdAt        DateTime  @default(now())
+
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  lead             Lead?     @relation(fields: [leadId], references: [id])
+  uploader         User      @relation(fields: [uploadedBy], references: [id])
+
+  @@index([customerId])
+  @@index([leadId])
+}
+
+// 13. Invoice
+model Invoice {
+  id               String    @id @default(uuid())
+  invoiceNumber    String    @unique
+  customerId       String
+  items            Json      // array of {name, qty, unit, rate, amount}
+  subtotal         Float
+  gst              Float
+  totalAmount      Float
+  paidAmount       Float     @default(0)
+  dueAmount        Float
+  status           InvoiceStatus @default(DRAFT)
+  sentAt           DateTime?
+  dueDate          DateTime?
+  createdAt        DateTime  @default(now())
+  generatedBy      String
+
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  generator        User      @relation(fields: [generatedBy], references: [id])
+  payments         Payment[]
+
+  @@index([status])
+  @@index([customerId])
+}
+
+// 14. Payment
+model Payment {
+  id               String    @id @default(uuid())
+  customerId       String
+  invoiceId        String?
+  amount           Float
+  paymentDate      DateTime
+  mode             PaymentMode
+  transactionRef   String?
+  milestone        PaymentMilestone
+  recordedBy       String
+  notes            String?
+  createdAt        DateTime  @default(now())
+
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  invoice          Invoice?  @relation(fields: [invoiceId], references: [id])
+  recorder         User      @relation(fields: [recordedBy], references: [id])
+
+  @@index([customerId])
+  @@index([invoiceId])
+}
+
+// 15. DocumentationChecklist
+model DocumentationChecklist {
+  id                  String    @id @default(uuid())
+  customerId          String    @unique
+  pmSuryaAppNo        String?
+  pmSuryaStatus       AppStatus @default(PENDING)
+  cmSchemeApplicable  Boolean   @default(false)
+  cmSchemeAppNo       String?
+  cmSchemeStatus      AppStatus @default(PENDING)
+  loanApplicable      Boolean   @default(false)
+  loanAppNo           String?
+  loanStatus          LoanStatus @default(NA)
+  netMeteringAppNo    String?
+  netMeteringStatus   AppStatus @default(PENDING)
+  assignedTo          String
+  completedAt         DateTime?
+  updatedAt           DateTime  @updatedAt
+
+  customer            Customer  @relation(fields: [customerId], references: [id])
+  assignee            User      @relation(fields: [assignedTo], references: [id])
+
+  @@index([assignedTo])
+}
+
+// 16. SiteSurvey
+model SiteSurvey {
+  id               String    @id @default(uuid())
+  customerId       String
+  visitId          String
+  conductedBy      String
+  roofDimensions   Json      // JSON structure
+  roofType         String
+  shadowAnalysis   String?
+  panelCount       Int
+  inverterCount    Int
+  inverterModel    String
+  structureDetails String?
+  cableLength      Float?
+  earthingRequired Boolean   @default(true)
+  specialNotes     String?
+  bomGenerated     Boolean   @default(false)
+  completedAt      DateTime?
+
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  visit            Visit     @relation(fields: [visitId], references: [id])
+  conductor        User      @relation(fields: [conductedBy], references: [id])
+  bomItems         BOMItem[]
+
+  @@index([customerId])
+}
+
+// 17. BOMItem
+model BOMItem {
+  id               String    @id @default(uuid())
+  siteSurveyId     String
+  customerId       String
+  itemName         String
+  sku              String
+  category         BOMCategory
+  quantity         Float
+  unit             String
+  status           BOMStatus @default(PENDING)
+
+  siteSurvey       SiteSurvey @relation(fields: [siteSurveyId], references: [id])
+  customer         Customer   @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@index([status])
+}
+
+// 18. StockItem
+model StockItem {
+  id                 String    @id @default(uuid())
+  name               String
+  sku                String    @unique
+  category           BOMCategory
+  quantity           Float     @default(0)
+  unit               String
+  lowStockThreshold  Float     @default(10)
+  dealerId           String?
+
+  dealer             Dealer?   @relation(fields: [dealerId], references: [id])
+  transactions       StockTransaction[]
+
+  @@index([dealerId])
+}
+
+// 19. StockTransaction
+model StockTransaction {
+  id               String    @id @default(uuid())
+  stockItemId      String
+  type             TxType
+  quantity         Float
+  reference        String?
+  notes            String?
+  performedBy      String
+  customerId       String?
+  createdAt        DateTime  @default(now())
+
+  stockItem        StockItem @relation(fields: [stockItemId], references: [id])
+  performer        User      @relation(fields: [performedBy], references: [id])
+  customer         Customer? @relation(fields: [customerId], references: [id])
+
+  @@index([stockItemId])
+}
+
+// 20. Dispatch
+model Dispatch {
+  id               String    @id @default(uuid())
+  customerId       String
+  dispatchedBy     String
+  items            Json      // array of dispatched items
+  status           DispatchStatus @default(PENDING)
+  dispatchedAt     DateTime?
+  notes            String?
+
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  dispatcher       User      @relation(fields: [dispatchedBy], references: [id])
+
+  @@index([customerId])
+  @@index([status])
+}
+
+// 21. Notification
+model Notification {
+  id               String    @id @default(uuid())
+  userId           String
+  type             String
+  title            String
+  message          String
+  isRead           Boolean   @default(false)
+  entityType       String?
+  entityId         String?
+  createdAt        DateTime  @default(now())
+
+  user             User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+// 22. TimelineEvent
+model TimelineEvent {
+  id               String    @id @default(uuid())
+  customerId       String?
+  leadId           String?
+  rawLeadId        String?
+  eventType        String
+  description      String
+  performedBy      String?
+  metadata         Json?
+  createdAt        DateTime  @default(now())
+
+  customer         Customer? @relation(fields: [customerId], references: [id])
+  lead             Lead?     @relation(fields: [leadId], references: [id])
+  rawLead          RawLead?  @relation(fields: [rawLeadId], references: [id])
+  performer        User?     @relation(fields: [performedBy], references: [id])
+
+  @@index([customerId])
+  @@index([leadId])
+  @@index([rawLeadId])
+}
+
+// 23. EscalationLog
+model EscalationLog {
+  id               String    @id @default(uuid())
+  // Legacy fields for backward compatibility
+  customerId       String?
+  taskType         String?
+  delayDays        Int?
+  notifiedAt       DateTime  @default(now())
+  resolved         Boolean   @default(false)
+  
+  // New team management fields
+  taskId           String?   // Reference to Task model
+  fromUserId       String    // User who had the task (assignedTo in legacy)
+  toUserId         String    // Supervisor receiving escalation (notifiedTo in legacy)
+  escalationLevel  Int       @default(1) // Positive integer for escalation level
+  reason           String    @default("OVERDUE_TASK") // Escalation reason
+  triggeredAt      DateTime  @default(now()) // When escalation was triggered
+  resolvedAt       DateTime? // When escalation was resolved
+  status           EscalationStatus @default(PENDING) // PENDING, ACKNOWLEDGED, RESOLVED
+
+  // Relations
+  customer         Customer? @relation(fields: [customerId], references: [id])
+  task             Task?     @relation(fields: [taskId], references: [id])
+  assignee         User      @relation("EscalationAssigned", fields: [fromUserId], references: [id])
+  notifier         User      @relation("EscalationNotified", fields: [toUserId], references: [id])
+
+  @@index([customerId])
+  @@index([taskId])
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@index([status])
+  @@index([escalationLevel])
+  @@index([triggeredAt])
+}
+
+// 24. AttendanceLog
+model AttendanceLog {
+  id               String    @id @default(uuid())
+  userId           String
+  visitId          String
+  checkInAt        DateTime  @default(now())
+  lat              Float
+  lng              Float
+  distance         Float?
+  createdAt        DateTime  @default(now())
+
+  user             User      @relation(fields: [userId], references: [id])
+  visit            Visit     @relation(fields: [visitId], references: [id])
+
+  @@index([userId])
+  @@index([visitId])
+}
+
+// 25. ChatbotConversation
+model ChatbotConversation {
+  id              String   @id @default(cuid())
+  proposalId      String
+  proposal        SolarProposal @relation(fields: [proposalId], references: [id])
+  userMessage     String   @db.Text
+  botResponse     String   @db.Text
+  language        String
+  wasOutOfScope   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  
+  @@index([proposalId])
+  @@index([createdAt])
+}
+
+// 26. Task
+model Task {
+  id               String    @id @default(uuid())
+  title            String
+  description      String?
+  priority         TaskPriority @default(MEDIUM)
+  status           TaskStatus @default(TODO)
+  dueDate          DateTime?
+  createdBy        String
+  assignedTo       String?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  creator          User      @relation("TaskCreator", fields: [createdBy], references: [id])
+  assignee         User?     @relation("TaskAssignee", fields: [assignedTo], references: [id])
+  escalations      EscalationLog[] // Escalations for this task
+
+  @@index([createdBy])
+  @@index([assignedTo])
+  @@index([status])
+  @@index([priority])
+  @@index([dueDate])
+}
+
+// 27. TeamHierarchy
+model TeamHierarchy {
+  id               String    @id @default(uuid())
+  userId           String    @unique
+  supervisorId     String?
+  level            Int       @default(0)
+  path             String    @default("/")
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user             User      @relation("HierarchyUser", fields: [userId], references: [id], onDelete: Cascade)
+  supervisor       User?     @relation("HierarchySupervisor", fields: [supervisorId], references: [id], onDelete: SetNull)
+
+  @@index([supervisorId])
+  @@index([level])
+  @@index([path])
+  @@index([isActive])
+  @@map("team_hierarchy")
+}
+
+// 28. PerformanceSnapshot
+model PerformanceSnapshot {
+  id                   String    @id @default(uuid())
+  userId               String
+  snapshotDate         DateTime
+  taskCompletionRate   Float     // 0-100 percentage
+  averageResponseTime  Float     // in hours, must be positive
+  overdueTaskCount     Int       @default(0)
+  qualityScore         Float     // 0-10 scale
+  calculatedAt         DateTime  @default(now())
+  createdAt            DateTime  @default(now())
+
+  user                 User      @relation("UserPerformanceSnapshots", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([snapshotDate])
+  @@index([calculatedAt])
+  @@unique([userId, snapshotDate])
+  @@map("performance_snapshots")
+}
+
+// 29. AIVoiceCampaign
+model AIVoiceCampaign {
+  id               String    @id @default(uuid())
+  name             String
+  description      String?
+  scriptTemplate   String    @db.Text
+  createdBy        String
+  dealerId         String?
+  status           CampaignStatus @default(DRAFT)
+  totalCalls       Int       @default(0)
+  completedCalls   Int       @default(0)
+  successfulCalls  Int       @default(0)
+  failedCalls      Int       @default(0)
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  creator          User      @relation(fields: [createdBy], references: [id])
+  dealer           Dealer?   @relation(fields: [dealerId], references: [id])
+  calls            AIVoiceCall[]
+
+  @@index([createdBy])
+  @@index([dealerId])
+  @@index([status])
+}
+
+// 30. AIVoiceCall
+model AIVoiceCall {
+  id                   String    @id @default(uuid())
+  campaignId           String
+  name                 String
+  phone                String
+  email                String?
+  city                 String?
+  address              String?
+  status               AICallStatus @default(PENDING)
+  disposition          AICallDisposition?
+  callDuration         Int?      // seconds
+  transcript           String?   @db.Text
+  recordingUrl         String?
+  qualificationScore   Int?
+  propertyOwnership    Boolean?
+  monthlyBill          Float?
+  interestLevel        String?
+  timeline             String?
+  notes                String?   @db.Text
+  convertedToRawLead   Boolean   @default(false)
+  rawLeadId            String?
+  scheduledAt          DateTime?
+  calledAt             DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  campaign             AIVoiceCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  rawLead              RawLead?  @relation(fields: [rawLeadId], references: [id])
+
+  @@index([campaignId])
+  @@index([status])
+  @@index([phone])
+  @@index([rawLeadId])
+}
