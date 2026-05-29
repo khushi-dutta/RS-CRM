@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Menu, Dropdown, Avatar, Badge, theme, Button as AntButton } from 'antd';
+import { Layout, Menu, Dropdown, Avatar, Badge, theme, Button as AntButton, message } from 'antd';
 import { useNavigate, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Megaphone, FileText, Users, Bell, LogOut, User, Sun, Moon, Phone } from 'lucide-react';
+import { LayoutDashboard, Megaphone, FileText, Users, Bell, LogOut, User, Sun, Moon, Phone, MapPin } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { useDealer } from '../context/DealerContext';
@@ -9,6 +9,7 @@ import { NotificationPanel } from '../components/NotificationPanel';
 import { useNotificationStore } from '../store/notificationStore';
 
 import { api } from '../lib/api';
+import backendApi from '../lib/axios';
 
 const { Header, Sider, Content } = Layout;
 
@@ -20,6 +21,7 @@ export const DashboardLayout: React.FC = () => {
   const { loading } = useDealer();
   const { token } = theme.useToken();
   const [notificationPanelVisible, setNotificationPanelVisible] = useState(false);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
   const { unreadCount, setNotifications: setStoreNotifications } = useNotificationStore();
   
 
@@ -53,11 +55,42 @@ export const DashboardLayout: React.FC = () => {
     navigate('/login');
   };
 
+  const handleMarkAttendance = () => {
+    if (!navigator.geolocation) {
+      message.error('Geolocation is not supported by your browser');
+      return;
+    }
+    setAttendanceLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const res = await backendApi.post('/attendance/mark', { lat: latitude, lng: longitude });
+          if (res.data.success) {
+            message.success(res.data.message);
+          } else {
+            message.error(res.data.message);
+          }
+        } catch (error: any) {
+          message.error(error.response?.data?.message || 'Failed to mark attendance. Ensure you are within 200m of office or site.');
+        } finally {
+          setAttendanceLoading(false);
+        }
+      },
+      (error) => {
+        setAttendanceLoading(false);
+        message.error('Please allow location access to mark attendance');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
   const getMenuItems = (role?: string) => {
     switch (role) {
       case 'ADMIN':
         return [
           { key: '/admin/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard' },
+          { key: '/admin/attendance', icon: <Users size={18} />, label: 'Attendance' },
           { key: '/admin/team', icon: <Users size={18} />, label: 'Team Architecture' },
           { key: '/admin/dealers', icon: <Users size={18} />, label: 'Dealer Management' },
           { key: '/admin/users', icon: <Users size={18} />, label: 'User Management' },
@@ -90,6 +123,7 @@ export const DashboardLayout: React.FC = () => {
       case 'INSTALLATION':
         return [
           { key: '/installation/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard' },
+          { key: '/installation/map', icon: <FileText size={18} />, label: 'Today\'s Map' },
           { key: '/installation/customers', icon: <Users size={18} />, label: 'My Customers' },
           { key: '/installation/tasks', icon: <FileText size={18} />, label: 'Tasks' },
         ];
@@ -99,6 +133,8 @@ export const DashboardLayout: React.FC = () => {
           { key: '/accountant/receivables', icon: <FileText size={18} />, label: 'Receivables' },
           { key: '/accountant/invoices', icon: <FileText size={18} />, label: 'Invoice Center' },
           { key: '/accountant/payments', icon: <FileText size={18} />, label: 'Payment History' },
+          { key: '/accountant/petrol-claims', icon: <FileText size={18} />, label: 'Petrol Claims' },
+          { key: '/accountant/payroll', icon: <FileText size={18} />, label: 'Staff Payroll' },
           { key: '/accountant/tasks', icon: <FileText size={18} />, label: 'Tasks' },
         ];
       case 'SALESPERSON':
@@ -106,8 +142,7 @@ export const DashboardLayout: React.FC = () => {
           { key: '/salesperson/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard' },
           { key: '/salesperson/leads', icon: <Users size={18} />, label: 'My Leads' },
           { key: '/salesperson/route', icon: <FileText size={18} />, label: 'Today Route' },
-          { key: '/salesperson/calendar', icon: <FileText size={18} />, label: 'Calendar' },
-          { key: '/salesperson/tasks', icon: <FileText size={18} />, label: 'Tasks' },
+          { key: '/salesperson/customer', icon: <Users size={18} />, label: 'Customer' },
         ];
       case 'DEALER_ADMIN':
         return [
@@ -181,6 +216,16 @@ export const DashboardLayout: React.FC = () => {
               onClick={toggleTheme}
               className="flex flex-col items-center justify-center text-apple-textMuted hover:text-apple-textLight dark:hover:text-white"
             />
+            <AntButton
+              type="primary"
+              shape="round"
+              icon={<MapPin size={16} />}
+              loading={attendanceLoading}
+              onClick={handleMarkAttendance}
+              className="bg-apple-blue hover:bg-apple-blue/90 shadow-md font-medium"
+            >
+              Mark Attendance
+            </AntButton>
             <Badge count={unreadCount} size="small" offset={[-2, 2]}>
               <div 
                 className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-apple-cardLight dark:bg-apple-cardDark/10 transition-colors cursor-pointer"

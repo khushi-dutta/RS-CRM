@@ -36,7 +36,7 @@ import {
   Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { api } from '../../lib/api';
 
 interface Campaign {
   id: string;
@@ -70,7 +70,7 @@ const AIVoiceCampaignsPage: React.FC = () => {
 
   const fetchCampaigns = async () => {
     try {
-      const response = await axios.get('/api/ai-voice-campaigns');
+      const response = await api.get('/ai-voice-campaigns');
       setCampaigns(response.data);
     } catch (error) {
       console.error('Error fetching campaigns:', error);
@@ -81,7 +81,7 @@ const AIVoiceCampaignsPage: React.FC = () => {
 
   const handleCreateCampaign = async () => {
     try {
-      await axios.post('/api/ai-voice-campaigns', newCampaign);
+      await api.post('/ai-voice-campaigns', newCampaign);
       setCreateDialogOpen(false);
       setNewCampaign({
         name: '',
@@ -96,7 +96,7 @@ const AIVoiceCampaignsPage: React.FC = () => {
 
   const handleStartCampaign = async (id: string) => {
     try {
-      await axios.post(`/api/ai-voice-campaigns/${id}/start`);
+      await api.post(`/ai-voice-campaigns/${id}/start`);
       fetchCampaigns();
     } catch (error) {
       console.error('Error starting campaign:', error);
@@ -105,7 +105,7 @@ const AIVoiceCampaignsPage: React.FC = () => {
 
   const handlePauseCampaign = async (id: string) => {
     try {
-      await axios.post(`/api/ai-voice-campaigns/${id}/pause`);
+      await api.post(`/ai-voice-campaigns/${id}/pause`);
       fetchCampaigns();
     } catch (error) {
       console.error('Error pausing campaign:', error);
@@ -211,7 +211,7 @@ const AIVoiceCampaignsPage: React.FC = () => {
                     size="small"
                     variant="outlined"
                     startIcon={<VisibilityIcon />}
-                    onClick={() => navigate(`/ai-voice-campaigns/${campaign.id}`)}
+                    onClick={() => navigate(`${campaign.id}`)}
                     fullWidth
                   >
                     View
@@ -222,7 +222,7 @@ const AIVoiceCampaignsPage: React.FC = () => {
                       size="small"
                       variant="contained"
                       startIcon={<UploadIcon />}
-                      onClick={() => navigate(`/ai-voice-campaigns/${campaign.id}`)}
+                      onClick={() => navigate(`${campaign.id}`)}
                       fullWidth
                     >
                       Upload

@@ -249,6 +249,9 @@ export default function VisitMap() {
 
   // Distances — recalculated from currentLoc OR startLocation
   const [distances, setDistances] = useState<Record<string, number>>({});
+  
+  // Track mock visits added to today
+  const [mockAddedToToday, setMockAddedToToday] = useState<string[]>([]);
 
   // Outcome modal
   const [outcomeVisit, setOutcomeVisit] = useState<any>(null);
@@ -266,6 +269,10 @@ export default function VisitMap() {
     let api = (routeData || []).filter((v: any) => dayjs(v.scheduledAt).format('YYYY-MM-DD') === TODAY);
     if (api.length === 0) api = DEMO_VISITS.map(v => ({...v}));
     
+    // Add mock moved items
+    const movedMocks = DEMO_NEARBY.filter(v => mockAddedToToday.includes(v.id)).map(v => ({...v, visitDate: TODAY, scheduledAt: new Date().toISOString()}));
+    api = [...api, ...movedMocks];
+    
     const pending = api.filter((v: any) => v.lat && v.lng && v.status !== 'COMPLETED');
     const others = api.filter((v: any) => !v.lat || !v.lng || v.status === 'COMPLETED');
     
@@ -282,8 +289,9 @@ export default function VisitMap() {
   })();
 
   const nearbyVisits: any[] = (() => {
-    const api = (routeData || []).filter((v: any) => dayjs(v.scheduledAt).format('YYYY-MM-DD') !== TODAY);
-    return api.length > 0 ? api : DEMO_NEARBY;
+    let api = (routeData || []).filter((v: any) => dayjs(v.scheduledAt).format('YYYY-MM-DD') !== TODAY);
+    if (api.length === 0) api = DEMO_NEARBY.filter(v => !mockAddedToToday.includes(v.id));
+    return api;
   })();
 
   // Recalculate distances whenever currentLoc OR startLocation changes
@@ -317,10 +325,17 @@ export default function VisitMap() {
 
   const addToTodayMutation = useMutation({
     mutationFn: async (visitId: string) => {
-      try { return await backendApi.patch(`/visits/${visitId}`, { visitDate: TODAY }); }
+      if (visitId.startsWith('n') || visitId.startsWith('v')) return { isMock: true, id: visitId };
+      try { return await backendApi.patch(`/visits/${visitId}`, { scheduledAt: new Date().toISOString() }); }
       catch { return {}; }
     },
-    onSuccess: () => { message.success('Added to today\'s route!'); queryClient.invalidateQueries(['my-route'] as any); },
+    onSuccess: (data: any) => { 
+      message.success('Added to today\'s route!'); 
+      if (data?.isMock) {
+        setMockAddedToToday(prev => [...prev, data.id]);
+      }
+      queryClient.invalidateQueries(['my-route'] as any); 
+    },
   });
 
   const outcomeSubmitMutation = useMutation({
@@ -328,11 +343,28 @@ export default function VisitMap() {
       try { return await backendApi.post(`/visits/${payload.visitId}/outcome`, payload); }
       catch { return payload; }
     },
-    onSuccess: (_: any, vars: any) => {
+    onSuccess: async (_: any, vars: any) => {
       if (vars.outcome === 'CONVERTED') message.success('Lead converted! Invoice sent.');
       else if (vars.outcome === 'FOLLOW_UP') message.success('Follow-up scheduled!');
       else message.info('Outcome saved.');
-      queryClient.invalidateQueries(['my-route'] as any);
+      await queryClient.invalidateQueries(['my-route'] as any);
+      
+      const pendingCount = todayVisits.filter(v => v.id !== outcomeVisit?.id && v.status !== 'COMPLETED').length;
+      if (pendingCount === 0 && todayVisits.length > 0) {
+        const stops = [
+          { lat: startLocation.lat, lng: startLocation.lng, name: startLocation.label },
+          ...todayVisits.map(v => ({ lat: v.lat, lng: v.lng, name: v.name || v.customer?.name || v.lead?.name }))
+        ].filter(s => s.lat && s.lng);
+        
+        backendApi.post('/travel-logs', {
+          date: dayjs().format('YYYY-MM-DD'),
+          stops,
+          notes: 'Auto-submitted after completing all sales visits'
+        }).then(() => {
+          message.success('Daily travel log auto-submitted to accounting!');
+        }).catch(console.error);
+      }
+
       setOutcomeVisit(null); setOutcomeStep('choice');
       outcomeForm.resetFields(); convertForm.resetFields();
     },
@@ -453,7 +485,7 @@ export default function VisitMap() {
             <Button
               type="primary"
               icon={<CarOutlined />}
-              onClick={() => setNavTarget(nextVisit)}
+              onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${nextVisit.lat},${nextVisit.lng}&dir_action=navigate`, '_blank')}
               className="bg-blue-600 hover:bg-blue-500 border-none"
             >
               Navigate to Next
@@ -525,7 +557,7 @@ export default function VisitMap() {
                           size="small"
                           icon={<CarOutlined />}
                           className="flex-1 min-w-[90px] flex items-center justify-center"
-                          onClick={() => setNavTarget(v)}
+                          onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${v.lat},${v.lng}&dir_action=navigate`, '_blank')}
                         >
                           Navigate
                         </Button>
@@ -539,6 +571,15 @@ export default function VisitMap() {
                         onClick={() => { setOutcomeVisit(v); setOutcomeStep('choice'); }}
                       >
                         {v.status === 'COMPLETED' ? 'Done' : near ? 'Outcome' : `${dist !== undefined ? fmtDist(dist) : '?'}`}
+                      </Button>
+                      <Button
+                        size="small"
+                        type="default"
+                        className="flex-1 min-w-[100px] flex items-center justify-center border-orange-300 text-orange-500"
+                        onClick={() => { setOutcomeVisit(v); setOutcomeStep('choice'); }}
+                        title="Demo Outcome (Ignores 200m limit)"
+                      >
+                        Demo Outcome
                       </Button>
                     </div>
                     {!near && v.status !== 'COMPLETED' && (

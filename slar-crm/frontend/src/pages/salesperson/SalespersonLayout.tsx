@@ -1,4 +1,4 @@
-import { Layout, Menu, Button as AntButton } from 'antd';
+﻿import { Layout, Menu, Button as AntButton } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   DashboardOutlined, 
@@ -77,8 +77,7 @@ export default function SalespersonLayout() {
             { key: 'dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
             { key: 'leads', icon: <TeamOutlined />, label: 'My Leads' },
             { key: 'route', icon: <CompassOutlined />, label: 'Sales Route' },
-            { key: 'calendar', icon: <CalendarOutlined />, label: 'Calendar' },
-            { key: 'tasks', icon: <CalendarOutlined />, label: 'Tasks' },
+            { key: 'customer', icon: <TeamOutlined />, label: 'Customer' },
             { type: 'divider' },
             { key: 'logout', icon: <LogoutOutlined />, label: 'Logout', danger: true },
           ]}
@@ -101,3 +100,4 @@ export default function SalespersonLayout() {
     </Layout>
   );
 }
+

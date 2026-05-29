@@ -44,6 +44,11 @@ import performanceRoutes from './routes/performance.routes';
 import escalationRoutes from './routes/escalation.routes';
 import aiVoiceCampaignRoutes from './routes/ai-voice-campaign.routes';
 import googleMapsRoutes from './routes/google-maps.routes';
+import travelLogRoutes from './routes/travel-log.routes';
+import systemSettingRoutes from './routes/system-setting.routes';
+import attendanceRoutes from './routes/attendance.routes';
+import holidayRoutes from './routes/holiday.routes';
+import payrollRoutes from './routes/payroll.routes';
 
 const logger = winston.createLogger({
   level: 'info',
@@ -54,6 +59,10 @@ const logger = winston.createLogger({
 export const app = express();
 const httpServer = createServer(app);
 export const io = initSocket(httpServer);
+
+// Initialize Voice Socket for AI Voice Test Interface
+import { initVoiceSocket } from './lib/voice-socket';
+initVoiceSocket(io);
 
 // Security: Helmet for security headers
 app.use(helmet({
@@ -136,6 +145,11 @@ app.use('/api/performance', performanceRoutes);
 app.use('/api/escalations', escalationRoutes);
 app.use('/api/ai-voice-campaigns', aiVoiceCampaignRoutes);
 app.use('/api/google-maps', googleMapsRoutes);
+app.use('/api/travel-logs', travelLogRoutes);
+app.use('/api/system-settings', systemSettingRoutes);
+app.use('/api/attendance', attendanceRoutes);
+app.use('/api/holidays', holidayRoutes);
+app.use('/api/payroll', payrollRoutes);
 
 app.use(errorHandler);
 

@@ -1,6 +1,8 @@
-import { useState, useCallback } from 'react';
-import { Card, Button, Select, Steps, Typography, Divider, Switch, Row, Col, Tag, Statistic } from 'antd';
-import { ArrowRightOutlined, ArrowLeftOutlined, BulbOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { useState, useCallback, useEffect } from 'react';
+import { Card, Button, Select, Steps, Typography, Divider, Switch, Row, Col, Tag, Statistic, Input, Modal } from 'antd';
+import { ArrowRightOutlined, ArrowLeftOutlined, BulbOutlined, ThunderboltOutlined, SearchOutlined, AimOutlined } from '@ant-design/icons';
+import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import RoofMapper, { RoofSection } from '../../components/solar-designer/RoofMapper';
 import Solar3DViewer from '../../components/solar-designer/Solar3DViewer';
 import {
@@ -12,6 +14,27 @@ import {
 } from '../../components/solar-designer/PanelLayoutEngine';
 
 const { Title, Text } = Typography;
+
+function FlyTo({ lat, lng }: { lat: number; lng: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.flyTo([lat, lng], 19, { animate: true, duration: 1.5 });
+  }, [lat, lng, map]);
+  return null;
+}
+
+function MapEvents({ onMove }: { onMove: (lat: number, lng: number) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    const handler = () => {
+      const center = map.getCenter();
+      onMove(center.lat, center.lng);
+    };
+    map.on('moveend', handler);
+    return () => { map.off('moveend', handler); };
+  }, [map, onMove]);
+  return null;
+}
 
 // Import panel database inline (bundled reference)
 const PANEL_OPTIONS = [
@@ -31,6 +54,30 @@ export default function SolarDesignerPage() {
   const [orientation, setOrientation] = useState<'PORTRAIT' | 'LANDSCAPE'>('PORTRAIT');
   const [showShading, setShowShading] = useState(false);
   const [layout, setLayout] = useState<PanelLayoutResult>(EMPTY_LAYOUT);
+
+  const [lat, setLat] = useState(28.6139);
+  const [lng, setLng] = useState(77.2090);
+  const [searchAddress, setSearchAddress] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
+
+  const handleGeocode = async () => {
+    if (!searchAddress) return;
+    setIsSearching(true);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchAddress)}&format=json&limit=1`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.length > 0) {
+        setLat(parseFloat(data[0].lat));
+        setLng(parseFloat(data[0].lon));
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   const handleRoofChange = useCallback((sections: RoofSection[]) => {
     setRoofSections(sections);
@@ -129,8 +176,8 @@ export default function SolarDesignerPage() {
       {currentStep === 0 && (
         <Card bordered={false} className="shadow-sm">
           <RoofMapper
-            lat={28.6139}
-            lng={77.2090}
+            lat={lat}
+            lng={lng}
             onChange={handleRoofChange}
           />
           <div className="flex justify-end mt-4">
@@ -294,6 +341,53 @@ export default function SolarDesignerPage() {
           </div>
         </div>
       )}
+
+      {/* Location Modal Popup */}
+      <Modal
+        title="Where are we installing?"
+        open={!locationConfirmed}
+        onCancel={() => {}}
+        closable={false}
+        maskClosable={false}
+        footer={null}
+        width={800}
+        destroyOnClose
+      >
+        <Text type="secondary" className="block mb-4">
+          Search for the address and drag the map to align the crosshair exactly on the roof.
+        </Text>
+        <div className="flex gap-2 mb-4">
+          <Input
+            placeholder="Enter address..."
+            value={searchAddress}
+            onChange={e => setSearchAddress(e.target.value)}
+            onPressEnter={handleGeocode}
+            prefix={<SearchOutlined />}
+            size="large"
+          />
+          <Button type="primary" size="large" onClick={handleGeocode} loading={isSearching}>Search</Button>
+        </div>
+        <div className="relative w-full h-[400px] rounded-xl overflow-hidden shadow-sm border border-slate-200 mb-6">
+          <MapContainer center={[lat, lng]} zoom={19} scrollWheelZoom className="w-full h-full">
+            <TileLayer
+              url="https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+              subdomains={['0','1','2','3']}
+              attribution="Google Maps"
+              maxZoom={21}
+            />
+            <FlyTo lat={lat} lng={lng} />
+            <MapEvents onMove={(newLat, newLng) => { setLat(newLat); setLng(newLng); }} />
+          </MapContainer>
+          {/* Crosshair Overlay */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[1000] pointer-events-none flex items-center justify-center drop-shadow-md">
+            <AimOutlined className="text-4xl text-blue-500" />
+          </div>
+        </div>
+        <Button type="primary" size="large" block icon={<ArrowRightOutlined />} onClick={() => setLocationConfirmed(true)}>
+          Confirm Location & Start Tracing
+        </Button>
+      </Modal>
+
     </div>
   );
 }

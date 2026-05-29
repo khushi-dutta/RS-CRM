@@ -1,25 +1,19 @@
 import { useState } from 'react';
-import { Table, Tag, Button, Input, Typography, Space } from 'antd';
-import { useQuery } from '@tanstack/react-query';
+import { Table, Tag, Button, Input, Typography, Space, DatePicker, Select, Dropdown, MenuProps, message } from 'antd';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api as backendApi } from '../../lib/api';
-import { PhoneOutlined, EnvironmentOutlined, EyeOutlined, BulbOutlined, UserOutlined } from '@ant-design/icons';
+import { PhoneOutlined, EnvironmentOutlined, EyeOutlined, BulbOutlined, PlusOutlined, UploadOutlined, DownloadOutlined, MailOutlined, CloseCircleOutlined, SwapOutlined, EditOutlined, CalendarOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnsType } from 'antd/es/table';
+import { AddLeadModal } from '../../components/AddLeadModal';
+import { UploadLeadsModal } from '../../components/UploadLeadsModal';
+import { LogInteractionModal } from '../../components/LogInteractionModal';
+import { ScheduleVisitModal } from '../../components/ScheduleVisitModal';
 
 const { Title } = Typography;
 const { Search } = Input;
-
-const DEMO_LEADS = [
-  { id: 'demo-1', leadCode: 'LD-001', name: 'Rajesh Kumar', phone: '+91 98765 43210', city: 'New Delhi', address: '12, Lajpat Nagar, New Delhi', status: 'NEW', email: 'rajesh.kumar@gmail.com' },
-  { id: 'demo-2', leadCode: 'LD-002', name: 'Priya Sharma', phone: '+91 87654 32109', city: 'Gurgaon', address: '45, Sector 14, Gurgaon', status: 'FOLLOW_UP', email: 'priya.sharma@yahoo.com' },
-  { id: 'demo-3', leadCode: 'LD-003', name: 'Amit Verma', phone: '+91 76543 21098', city: 'Noida', address: '78, Sector 62, Noida', status: 'VISIT_SCHEDULED', email: 'amit.verma@outlook.com' },
-  { id: 'demo-4', leadCode: 'LD-004', name: 'Sunita Patel', phone: '+91 65432 10987', city: 'Faridabad', address: '23, NIT, Faridabad', status: 'PROPOSAL_SENT', email: 'sunita.patel@gmail.com' },
-  { id: 'demo-5', leadCode: 'LD-005', name: 'Vikram Singh', phone: '+91 54321 09876', city: 'New Delhi', address: '56, Dwarka Sector 10, New Delhi', status: 'NEGOTIATION', email: 'vikram.singh@gmail.com' },
-  { id: 'demo-6', leadCode: 'LD-006', name: 'Meena Agarwal', phone: '+91 43210 98765', city: 'Ghaziabad', address: '89, Indirapuram, Ghaziabad', status: 'WON', email: 'meena.agarwal@gmail.com' },
-  { id: 'demo-7', leadCode: 'LD-007', name: 'Deepak Joshi', phone: '+91 32109 87654', city: 'New Delhi', address: '34, Rohini Sector 3, New Delhi', status: 'NEW', email: 'deepak.joshi@gmail.com' },
-  { id: 'demo-8', leadCode: 'LD-008', name: 'Kavita Rao', phone: '+91 21098 76543', city: 'Gurgaon', address: '67, DLF Phase 2, Gurgaon', status: 'FOLLOW_UP', email: 'kavita.rao@gmail.com' },
-  { id: 'demo-9', leadCode: 'LD-009', name: 'Suresh Nair', phone: '+91 10987 65432', city: 'Noida', address: '90, Sector 18, Noida', status: 'LOST', email: 'suresh.nair@gmail.com' },
-];
+const { RangePicker } = DatePicker;
+const { Option } = Select;
 
 const STATUS_COLORS: Record<string, string> = {
   NEW: 'default',
@@ -50,21 +44,81 @@ interface Lead {
   city?: string;
   address?: string;
   status: string;
+  createdAt?: string;
 }
 
 export default function LeadsBoard() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  
+  const [isAddModalVisible, setAddModalVisible] = useState(false);
+  const [isUploadModalVisible, setUploadModalVisible] = useState(false);
+
+  const [interactionLead, setInteractionLead] = useState<Lead | null>(null);
+  const [salesVisitLead, setSalesVisitLead] = useState<Lead | null>(null);
+
+  const [dateRange, setDateRange] = useState<any>(null);
+  const [zoneId, setZoneId] = useState<string>();
+  const [assignedSalesperson, setAssignedSalesperson] = useState<string>();
+  const [status, setStatus] = useState<string>();
 
   const { data: leadsData, isLoading } = useQuery({
-    queryKey: ['sales-leads'],
+    queryKey: ['sales-leads', dateRange, zoneId, assignedSalesperson, status],
     queryFn: async () => {
-      const res = await backendApi.get('/leads', { params: { limit: 100 } });
-      return res.data.data.leads;
+      const params: any = { limit: 100 };
+      if (dateRange && dateRange[0]) params.dateFrom = dateRange[0].toISOString();
+      if (dateRange && dateRange[1]) params.dateTo = dateRange[1].toISOString();
+      if (zoneId) params.zoneId = zoneId;
+      if (assignedSalesperson) params.assignedSalesperson = assignedSalesperson;
+      if (status) params.status = status
+      if (assignedSalesperson) params.assignedSalesperson = assignedSalesperson;
+      if (status) params.status = status;
+      
+      const res = await backendApi.get('/leads', { params });
+      
+      const demoCustomers: Lead[] = [
+        {
+          id: 'demo-1',
+          leadCode: 'LD-1001',
+          name: 'Acme Corp',
+          phone: '(555) 123-4567',
+          email: 'contact@acmecorp.com',
+          city: 'New York',
+          address: '123 Business Rd.',
+          status: 'NEW',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'demo-2',
+          leadCode: 'LD-1002',
+          name: 'Stark Industries',
+          phone: '(555) 987-6543',
+          email: 'stark@industries.com',
+          city: 'Los Angeles',
+          address: 'Avengers Tower',
+          status: 'WON',
+          createdAt: new Date(Date.now() - 86400000).toISOString()
+        },
+        {
+          id: 'demo-3',
+          leadCode: 'LD-1003',
+          name: 'Wayne Enterprises',
+          phone: '(555) 555-0199',
+          email: 'info@wayne.com',
+          city: 'Gotham',
+          address: '1007 Mountain Drive',
+          status: 'FOLLOW_UP',
+          createdAt: new Date(Date.now() - 2*86400000).toISOString()
+        }
+      ];
+
+      const apiLeads = res.data.data?.leads || [];
+      return [...demoCustomers, ...apiLeads];
     }
   });
 
-  const leads = (leadsData && leadsData.length > 0) ? leadsData : DEMO_LEADS;
+  const leads = (leadsData && leadsData.length > 0) ? leadsData : [];
 
   const filteredLeads = leads.filter((l: Lead) =>
     l.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -72,56 +126,110 @@ export default function LeadsBoard() {
     l.leadCode.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const handleExport = async () => {
+    try {
+      const params: any = {};
+      if (dateRange && dateRange[0]) params.dateFrom = dateRange[0].toISOString();
+      if (dateRange && dateRange[1]) params.dateTo = dateRange[1].toISOString();
+      if (zoneId) params.zoneId = zoneId;
+      if (assignedSalesperson) params.assignedSalesperson = assignedSalesperson;
+      if (status) params.status = status;
+      
+      const queryParams = new URLSearchParams(params).toString();
+      window.open('/api/leads/export/csv?' + queryParams, '_blank');
+    } catch(err) { console.error(err); }
+  };
+
+  const initiateInteraction = (record: Lead) => {
+    setTimeout(() => {
+      setInteractionLead(record);
+    }, 100);
+  };
+
+  const handleQuickAction = (key: string, record: Lead) => {
+    if (key === 'sales_visit') {
+      setSalesVisitLead(record);
+    } else if (['follow_up', 'not_interested', 'lead_lost'].includes(key)) {
+      setInteractionLead(record);
+    } else {
+      message.success(`Action "${key.replace('_', ' ')}" selected for ${record.name}`);
+    }
+  };
+
+  const getQuickActionMenu = (record: Lead): MenuProps => ({
+    onClick: ({ key }) => handleQuickAction(key, record),
+    items: [
+      { key: 'follow_up', label: 'Follow Up', icon: <PhoneOutlined /> },
+      { key: 'sales_visit', label: 'Sales Visit', icon: <EnvironmentOutlined /> },
+      { key: 'not_interested', label: 'Not Interested', icon: <CloseCircleOutlined /> },
+    ],
+  });
+
   const columns: ColumnsType<Lead> = [
-    {
-      title: 'Lead Code',
-      dataIndex: 'leadCode',
-      key: 'leadCode',
-      width: 120,
-      render: (code: string) => <span className="font-semibold">{code}</span>,
-    },
     {
       title: 'Customer',
       dataIndex: 'name',
       key: 'name',
       render: (name: string, record: Lead) => (
         <div>
-          <div className="font-medium text-blue-600 cursor-pointer hover:underline" onClick={() => navigate(`/salesperson/leads/${record.id}`)}>
+          <div className="font-medium text-blue-600 cursor-pointer hover:underline" onClick={() => navigate('/salesperson/leads/' + record.id)}>
             {name}
           </div>
-          {record.email && <div className="text-xs text-gray-500">{record.email}</div>}
+          <div className="text-xs text-gray-500 font-mono mt-1">{record.leadCode}</div>
         </div>
       ),
     },
     {
-      title: 'Phone',
-      dataIndex: 'phone',
-      key: 'phone',
-      width: 150,
-      render: (phone: string) => (
-        <div className="flex items-center gap-1 text-sm">
-          <PhoneOutlined className="text-gray-400" />
-          {phone}
+      title: 'Contact',
+      key: 'contact',
+      render: (_, record: Lead) => (
+        <div className="flex flex-col gap-2 p-1 -ml-1">
+          <a
+            href={`tel:${record.phone}`}
+            onClick={() => initiateInteraction(record)}
+            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 w-fit"
+          >
+            <PhoneOutlined className="text-gray-400" />
+            {record.phone}
+          </a>
+          {record.email && (
+            <a
+              href={`mailto:${record.email}`}
+              onClick={() => initiateInteraction(record)}
+              className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-800 w-fit mt-1"
+            >
+              <MailOutlined className="text-gray-400" />
+              {record.email}
+            </a>
+          )}
         </div>
       ),
     },
     {
-      title: 'Location',
-      dataIndex: 'city',
-      key: 'city',
-      width: 180,
-      render: (city: string, record: Lead) => (
-        <div className="flex items-center gap-1 text-sm">
-          <EnvironmentOutlined className="text-gray-400" />
-          {city || record.address || '-'}
+      title: 'Address',
+      key: 'address',
+      render: (_, record: Lead) => (
+        <div className="flex items-start gap-1 text-sm text-gray-600">
+          <EnvironmentOutlined className="text-gray-400 mt-1" />
+          <span className="line-clamp-2">{record.address || record.city || '-'}</span>
         </div>
       ),
+    },
+    {
+      title: 'Created Date',
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      render: (date?: string) => (
+        <div className="flex items-center gap-1 text-sm text-gray-600">
+          <CalendarOutlined className="text-gray-400" />
+          {date ? new Date(date).toLocaleDateString() : '-'}
+        </div>
+      )
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 150,
       filters: [
         { text: 'New', value: 'NEW' },
         { text: 'Follow Up', value: 'FOLLOW_UP' },
@@ -141,67 +249,106 @@ export default function LeadsBoard() {
     {
       title: 'Actions',
       key: 'actions',
-      width: 180,
       render: (_, record: Lead) => (
         <Space size="small">
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => navigate(`/salesperson/leads/${record.id}`)}
-          >
-            View
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<BulbOutlined />}
-            className="text-purple-600 hover:text-purple-700"
-            onClick={() => navigate('/studio')}
-          >
-            Proposal
-          </Button>
+          <Button type="text" size="small" icon={<CloseCircleOutlined />} danger title="Lead Lost" onClick={() => handleQuickAction('lead_lost', record)} />
+          <Button type="text" size="small" icon={<PhoneOutlined />} className="text-blue-600" title="Follow Up" onClick={() => handleQuickAction('follow_up', record)} />
+          <Button type="text" size="small" icon={<EnvironmentOutlined />} className="text-orange-600" title="Sales Visit" onClick={() => handleQuickAction('sales_visit', record)} />
+          <Button type="text" size="small" icon={<SwapOutlined />} className="text-gray-600" title="Reassign" onClick={() => handleQuickAction('reassign', record)} />
+          <Button type="text" size="small" icon={<EditOutlined />} className="text-gray-600" title="Edit" onClick={() => handleQuickAction('edit', record)} />
         </Space>
       ),
     },
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <Title level={4} className="!mb-0">My Leads</Title>
+        <div>
+          <Title level={3} className="!mb-1">Customer Leads</Title>
+          <p className="text-gray-500">Manage and track your customer pipeline.</p>
+        </div>
+        
+        <div className="flex flex-wrap gap-3">
+          <Button type="primary" size="large" className="bg-blue-600 shadow-md hover:bg-blue-700" icon={<PlusOutlined />} onClick={() => setAddModalVisible(true)}>
+            Add Customer
+          </Button>
+          <Button size="large" icon={<UploadOutlined />} onClick={() => setUploadModalVisible(true)}>
+            Import Excel
+          </Button>
+          <Button size="large" icon={<DownloadOutlined />} onClick={handleExport}>
+            Export CSV
+          </Button>
+        </div>
+      </div>
+      
+      <div className="flex flex-col md:flex-row gap-4 bg-white p-5 rounded-xl shadow-sm border border-gray-100">
         <Search
-          placeholder="Search by name, phone, or lead code..."
+          size="large"
+          placeholder="Search by name, code or city"
           allowClear
           onChange={e => setSearchTerm(e.target.value)}
           className="max-w-md"
-          size="large"
         />
+        <RangePicker size="large" onChange={(dates) => setDateRange(dates)} className="w-full md:w-auto" />
+        <Select size="large" allowClear placeholder="Filter by Status" onChange={(val) => setStatus(val)} className="w-full md:w-[180px]">
+          <Select.Option value="NEW">New Lead</Select.Option>
+          <Select.Option value="CONTACTED">Contacted</Select.Option>
+          <Select.Option value="QUALIFIED">Qualified</Select.Option>
+          <Select.Option value="PROPOSAL">Proposal</Select.Option>
+          <Select.Option value="WON">Won</Select.Option>
+          <Select.Option value="LOST">Lost</Select.Option>
+          <Select.Option value="ON_HOLD">On Hold</Select.Option>
+        </Select>
+        <Select allowClear placeholder="Select Zone" onChange={(val) => setZoneId(val)} className="min-w-[150px]">
+          {/* Options will be populated from API */}
+        </Select>
+        <Select allowClear placeholder="Salesperson" onChange={(val) => setAssignedSalesperson(val)} className="min-w-[150px]">
+          {/* Options will be populated from API */}
+        </Select>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={filteredLeads}
-        rowKey="id"
-        loading={isLoading}
-        pagination={{
-          pageSize: 10,
-          showSizeChanger: true,
-          showTotal: (total) => `Total ${total} leads`,
-          pageSizeOptions: ['10', '20', '50', '100'],
-        }}
-        className="bg-white dark:bg-apple-cardDark rounded-lg shadow-sm"
-        onRow={(record) => ({
-          className: 'cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5',
-          onClick: (e) => {
-            // Don't navigate if clicking on action buttons
-            const target = e.target as HTMLElement;
-            if (!target.closest('button') && !target.closest('a')) {
-              navigate(`/salesperson/leads/${record.id}`);
-            }
-          },
-        })}
+      <div className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
+        <Table
+          columns={columns}
+          dataSource={filteredLeads}
+          rowKey="id"
+          loading={isLoading}
+          pagination={{
+            pageSize: 10,
+            showSizeChanger: true,
+            showTotal: (total) => `Showing ${total} customers`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            className: "!px-6 !py-4 !m-0 border-t border-gray-100 bg-gray-50/50"
+          }}
+          className="custom-leads-table"
+        />
+      </div>
+      
+      <AddLeadModal 
+        visible={isAddModalVisible} 
+        onClose={() => setAddModalVisible(false)} 
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['sales-leads'] })}
       />
-    </div>
+      
+      <UploadLeadsModal 
+        visible={isUploadModalVisible} 
+        onClose={() => setUploadModalVisible(false)} 
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['sales-leads'] })}
+      />
+
+      <LogInteractionModal 
+        visible={!!interactionLead} 
+        lead={interactionLead}
+        onClose={() => setInteractionLead(null)} 
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['sales-leads'] })}
+      />
+
+      <ScheduleVisitModal 
+        visible={!!salesVisitLead} 
+        lead={salesVisitLead}
+        onClose={() => setSalesVisitLead(null)} 
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['sales-leads'] })}
+      />    </div>
   );
 }

@@ -105,12 +105,20 @@ function rectOverlapsPolygon(cx: number, cy: number, hw: number, hh: number, pol
   return corners.some(c => pointInPolygon(c, polygon));
 }
 
-/** Inset a polygon inward by `offsetM` meters (simple edge-parallel shrink) */
 function insetPolygon(polygon: Point[], offsetM: number): Point[] {
   if (polygon.length < 3) return polygon;
   const n = polygon.length;
-  const result: Point[] = [];
 
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += polygon[i].x * polygon[j].y - polygon[j].x * polygon[i].y;
+  }
+  const isCCW = area > 0;
+  // Right-hand normal (dy, -dx) points INWARD if clockwise, OUTWARD if CCW.
+  const effectiveOffset = isCCW ? -offsetM : offsetM;
+
+  const result: Point[] = [];
   for (let i = 0; i < n; i++) {
     const prev = polygon[(i - 1 + n) % n];
     const curr = polygon[i];
@@ -122,18 +130,22 @@ function insetPolygon(polygon: Point[], offsetM: number): Point[] {
     const len1 = Math.hypot(e1x, e1y), len2 = Math.hypot(e2x, e2y);
     if (len1 === 0 || len2 === 0) { result.push({ ...curr }); continue; }
 
-    // Inward normals
+    // Right-hand normals
     const n1x = e1y / len1, n1y = -e1x / len1;
     const n2x = e2y / len2, n2y = -e2x / len2;
 
     // Bisector
     const bx = n1x + n2x, by = n1y + n2y;
     const blen = Math.hypot(bx, by);
-    if (blen < 1e-6) { result.push({ x: curr.x + n1x * offsetM, y: curr.y + n1y * offsetM }); continue; }
+    if (blen < 1e-6) { result.push({ x: curr.x + n1x * effectiveOffset, y: curr.y + n1y * effectiveOffset }); continue; }
 
     // Scale bisector to get inset amount
     const dot = n1x * (bx / blen) + n1y * (by / blen);
-    const scale = dot === 0 ? offsetM : offsetM / dot;
+    if (Math.abs(dot) < 1e-6) {
+      result.push({ x: curr.x, y: curr.y });
+      continue;
+    }
+    const scale = effectiveOffset / dot;
     result.push({ x: curr.x + (bx / blen) * scale, y: curr.y + (by / blen) * scale });
   }
   return result;

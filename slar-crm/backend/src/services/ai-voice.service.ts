@@ -110,10 +110,18 @@ export class AIVoiceService {
       },
     });
 
-    // Queue all pending calls
-    for (const call of campaign.calls) {
-      await this.queueCall(call.id);
-    }
+    // Queue all pending calls asynchronously in background
+    setTimeout(async () => {
+      for (const call of campaign.calls) {
+        try {
+          await this.queueCall(call.id);
+          // Add a 1 second delay between calls to avoid rate limits
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          console.error(`Failed to process call ${call.id}:`, error);
+        }
+      }
+    }, 0);
 
     return campaign;
   }
@@ -182,7 +190,7 @@ export class AIVoiceService {
           voice: 'maya', // Female Indian voice
           language: 'en-IN',
           max_duration: 300, // 5 minutes max
-          webhook: `${process.env.BACKEND_URL}/api/ai-voice/webhook/${callId}`,
+          webhook: `${process.env.BACKEND_URL}/api/ai-voice-campaigns/webhook/${callId}`,
         } as BlandAICallRequest,
         {
           headers: {
@@ -444,7 +452,7 @@ export class AIVoiceService {
       data: { status: 'RUNNING' },
     });
 
-    // Queue any pending calls
+    // Queue any pending calls in background
     const pendingCalls = await prisma.aIVoiceCall.findMany({
       where: {
         campaignId,
@@ -452,9 +460,16 @@ export class AIVoiceService {
       },
     });
 
-    for (const call of pendingCalls) {
-      await this.queueCall(call.id);
-    }
+    setTimeout(async () => {
+      for (const call of pendingCalls) {
+        try {
+          await this.queueCall(call.id);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          console.error(`Failed to process call ${call.id}:`, error);
+        }
+      }
+    }, 0);
 
     return campaign;
   }

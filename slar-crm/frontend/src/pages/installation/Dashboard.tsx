@@ -10,6 +10,7 @@ import { DashboardCard } from '../../components/DashboardCard';
 import { useQuery } from '@tanstack/react-query';
 import backendApi from '../../lib/axios';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { useNavigate } from 'react-router-dom';
 
 let DefaultIcon = L.icon({
     iconUrl: icon,
@@ -46,6 +47,8 @@ const mockMaterialData = [
 ];
 
 const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
+  
   // Fetch Installation Stats
   const { data: statsData, isLoading: statsLoading } = useQuery({
     queryKey: ['inst-stats'],
@@ -130,8 +133,20 @@ const Dashboard: React.FC = () => {
       <Row gutter={[24, 24]}>
         {/* ROUTE MAP FLAG */}
         <Col xs={24}>
-          <DashboardCard title="Today's Visits Map" bodyStyle={{ padding: 0 }}>
-            <div style={{ height: '350px', width: '100%' }}>
+          <DashboardCard 
+            title="Today's Visits Map" 
+            bodyStyle={{ padding: 0 }}
+            extra={
+              <Button 
+                type="primary" 
+                onClick={() => navigate('/installation/map')}
+                className="bg-blue-600 hover:bg-blue-500 border-none"
+              >
+                Open Today's Route Map
+              </Button>
+            }
+          >
+            <div style={{ height: '350px', width: '100%', position: 'relative', cursor: 'pointer' }} onClick={() => navigate('/installation/map')}>
               <MapContainer center={[28.6139, 77.2090]} zoom={10} style={{ height: '100%', width: '100%', borderBottomLeftRadius: '8px', borderBottomRightRadius: '8px', zIndex: 0 }}>
                 <TileLayer
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -143,6 +158,9 @@ const Dashboard: React.FC = () => {
                 ))}
                 <Polyline positions={routePoints} color="blue" weight={3} dashArray="5, 10" />
               </MapContainer>
+              <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow-lg z-[1000] pointer-events-none">
+                <span className="text-sm font-semibold text-blue-600">Click to open interactive route map with navigation</span>
+              </div>
             </div>
           </DashboardCard>
         </Col>
@@ -207,7 +225,7 @@ const Dashboard: React.FC = () => {
               dataSource={dashboardData}
               renderItem={item => (
                 <List.Item
-                  actions={[<Button key="navigate" size="small" type="primary" ghost>Navigate</Button>]}
+                  actions={[<Button key="navigate" size="small" type="primary" ghost onClick={() => navigate('/installation/map')}>Navigate</Button>]}
                 >
                   <List.Item.Meta
                     title={<span className="font-semibold">{item.name}</span>}

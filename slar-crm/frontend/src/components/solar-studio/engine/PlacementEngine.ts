@@ -5,6 +5,7 @@
 import type { Point2D, DesignModule, Orientation } from '../store/types';
 import { uid, pointInPolygon, rectFullyInPolygon, rectOverlapsPolygon, insetPolygon, rotatePoint, boundingBox } from '../utils/geometry';
 import { shadowFreeRowSpacing } from '../utils/geometry';
+import RBush from 'rbush';
 
 export interface PlacementInput {
   roofPolygon: Point2D[];          // in px coordinates
@@ -73,10 +74,18 @@ export function runPlacement(input: PlacementInput): PlacementResult {
   const rotatedPoly = insetPoly.map(p => rotatePoint(p, rotAngle));
   const rotatedObs = bufferedObs.map(obs => obs.map(p => rotatePoint(p, rotAngle)));
 
-  // Step 4: Bounding box
+  // Step 4: Spatial index for obstructions (RBush)
+  const tree = new RBush();
+  const obsItems = rotatedObs.map((obs, i) => {
+    const box = boundingBox(obs);
+    return { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY, index: i };
+  });
+  tree.load(obsItems);
+
+  // Step 5: Bounding box of roof
   const bb = boundingBox(rotatedPoly);
 
-  // Step 5: Row spacing
+  // Step 6: Row spacing
   const rowSpacing = input.rowSpacingPx;
   const colSpacing = moduleWidthPx + input.colSpacingPx;
 
@@ -102,8 +111,21 @@ export function runPlacement(input: PlacementInput): PlacementResult {
           // Check module fits inside roof (in rotated frame)
           if (!rectFullyInPolygon(cx, cy, hw, hh, rotatedPoly)) continue;
 
-          // Check no overlap with obstructions
-          const blocked = rotatedObs.some(obs => rectOverlapsPolygon(cx, cy, hw, hh, obs));
+          // Spatial search for nearby obstructions
+          const searchBox = {
+            minX: cx - hw,
+            minY: cy - hh,
+            maxX: cx + hw,
+            maxY: cy + hh
+          };
+          
+          const nearbyObs = tree.search(searchBox);
+          
+          // Precise polygon overlap check only for nearby obstructions
+          const blocked = nearbyObs.some((item: any) => 
+            rectOverlapsPolygon(cx, cy, hw, hh, rotatedObs[item.index])
+          );
+          
           if (blocked) continue;
 
           // Rotate back to original frame

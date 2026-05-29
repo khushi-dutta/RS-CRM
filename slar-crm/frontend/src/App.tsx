@@ -31,6 +31,7 @@ import VisitDetail from './pages/salesperson/VisitDetail';
 import SolarDesigner from './pages/salesperson/SolarDesigner';
 import LeadDetail from './pages/salesperson/LeadDetail';
 import VisitCalendar from './pages/salesperson/VisitCalendar';
+import CustomerBoard from './pages/salesperson/CustomerBoard';
 
 import SolarDesignerPage from './pages/solar-designer/index';
 import StudioPage from './pages/solar-designer/StudioPage';
@@ -44,6 +45,7 @@ import DealerManagement from './pages/admin/DealerManagement';
 import UserManagement from './pages/admin/UserManagement';
 import SystemSettings from './pages/admin/SystemSettings';
 import AuditTrail from './pages/admin/AuditTrail';
+import AdminAttendance from './pages/admin/AdminAttendance';
 
 import ProjectHeadDashboard from './pages/project-head/Dashboard';
 import KanbanBoard from './pages/project-head/KanbanBoard';
@@ -58,12 +60,15 @@ import Pipeline from './pages/warehouse/Pipeline';
 import StockHistory from './pages/warehouse/StockHistory';
 
 import InstallationDashboard from './pages/installation/Dashboard';
+import InstallationMap from './pages/installation/InstallationMap';
 import InstallCustomers from './pages/installation/MyCustomers';
 
 import AccountantDashboard from './pages/accountant/Dashboard';
 import Receivables from './pages/accountant/Receivables';
 import InvoiceCenter from './pages/accountant/InvoiceCenter';
 import PaymentHistory from './pages/accountant/PaymentHistory';
+import PetrolClaims from './pages/accountant/PetrolClaims';
+import Payroll from './pages/accountant/Payroll';
 import TasksPage from './pages/tasks/TasksPage';
 import CustomerPage from './pages/customer/CustomerPage';
 
@@ -154,7 +159,7 @@ function Login() {
               <Input className="bg-apple-gray dark:bg-black border-transparent hover:border-black/10 focus:border-apple-blue dark:hover:border-white/10 dark:focus:border-apple-blue transition-colors px-4 py-3 rounded-[12px]" placeholder="name@example.com" />
             </Form.Item>
             <Form.Item label={<span className="font-semibold text-apple-textMuted text-[13px] tracking-tight uppercase">PASSWORD</span>} name="password" rules={[{ required: true }]} className="mb-6">
-              <Input.Password className="bg-apple-gray dark:bg-black border-transparent hover:border-black/10 focus:border-apple-blue dark:hover:border-white/10 dark:focus:border-apple-blue transition-colors px-4 py-3 rounded-[12px]" placeholder="••••••••" />
+              <Input.Password className="bg-apple-gray dark:bg-black border-transparent hover:border-black/10 focus:border-apple-blue dark:hover:border-white/10 dark:focus:border-apple-blue transition-colors px-4 py-3 rounded-[12px]" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" />
             </Form.Item>
             <Form.Item label={<span className="font-semibold text-apple-textMuted text-[13px] tracking-tight uppercase">DEMO PRESET</span>} name="preset" className="mb-8">
               <Select
@@ -181,7 +186,7 @@ function Login() {
             </Form.Item>
             {error ? <Alert type="error" message={error} className="mb-6 rounded-[12px] border-red-500/20 bg-red-500/10 text-red-600 font-medium" showIcon /> : null}
             <Button type="primary" htmlType="submit" loading={loading} block className="h-12 text-[15px] font-semibold tracking-tight shadow-md shadow-apple-blue/20 hover:shadow-apple-blue/30 border-0 rounded-[14px]">
-              Continue to Workspace →
+              Continue to Workspace â†’
             </Button>
           </Form>
         </div>
@@ -309,6 +314,7 @@ export default function App() {
             <Route path="users" element={<UserManagement />} />
             <Route path="settings" element={<SystemSettings />} />
             <Route path="audit" element={<AuditTrail />} />
+            <Route path="attendance" element={<AdminAttendance />} />
             <Route path="tasks" element={<TasksPage />} />
           </Route>
 
@@ -376,6 +382,7 @@ export default function App() {
           >
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<InstallationDashboard />} />
+            <Route path="map" element={<InstallationMap />} />
             <Route path="customers" element={<InstallCustomers />} />
             <Route path="tasks" element={<TasksPage />} />
           </Route>
@@ -395,6 +402,8 @@ export default function App() {
             <Route path="receivables" element={<Receivables />} />
             <Route path="invoices" element={<InvoiceCenter />} />
             <Route path="payments" element={<PaymentHistory />} />
+            <Route path="petrol-claims" element={<PetrolClaims />} />
+            <Route path="payroll" element={<Payroll />} />
             <Route path="tasks" element={<TasksPage />} />
           </Route>
 
@@ -413,7 +422,7 @@ export default function App() {
             <Route path="leads" element={<LeadsBoard />} />
             <Route path="leads/:id" element={<LeadDetail />} />
             <Route path="route" element={<VisitMap />} />
-            <Route path="calendar" element={<VisitCalendar />} />
+            <Route path="customer" element={<CustomerBoard />} />
             <Route path="visits/:id" element={<VisitDetail />} />
             <Route path="solar-designer" element={<SolarDesigner />} />
             <Route path="tasks" element={<TasksPage />} />
@@ -469,3 +478,5 @@ export default function App() {
     </ConfigProvider>
   );
 }
+
+

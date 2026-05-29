@@ -15,7 +15,7 @@ export const getUsers = async (req: AuthenticatedRequest, res: Response) => {
     const users = await prisma.user.findMany({
       select: {
         id: true, name: true, email: true, phone: true, role: true, 
-        isActive: true, lastLoginAt: true, dealerId: true,
+        isActive: true, lastLoginAt: true, dealerId: true, monthlySalary: true
         // Since Zone isn't tightly bound natively in default User, we mocked it in UI, but we retrieve if they exist.
       },
       orderBy: { createdAt: 'desc' }
@@ -28,7 +28,7 @@ export const getUsers = async (req: AuthenticatedRequest, res: Response) => {
 
 export const createUser = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { name, email, phone, role, dealerId, zoneId } = req.body;
+    const { name, email, phone, role, dealerId, zoneId, monthlySalary } = req.body;
     
     // Check email
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -40,7 +40,8 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
 
     const user = await prisma.user.create({
       data: {
-        name, email, phone: phone || '', role, password: hashedPassword, dealerId, isActive: true
+        name, email, phone: phone || '', role, password: hashedPassword, dealerId, isActive: true,
+        monthlySalary: monthlySalary ? parseFloat(monthlySalary) : 0
       }
     });
 
@@ -61,10 +62,13 @@ export const createUser = async (req: AuthenticatedRequest, res: Response) => {
 export const updateUser = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, email, phone, role, dealerId, isActive } = req.body;
+    const { name, email, phone, role, dealerId, isActive, monthlySalary } = req.body;
     const updated = await prisma.user.update({
       where: { id },
-      data: { name, email, phone, role, dealerId, isActive }
+      data: { 
+        name, email, phone, role, dealerId, isActive,
+        ...(monthlySalary !== undefined && { monthlySalary: parseFloat(monthlySalary) })
+      }
     });
     res.json({ success: true, data: updated });
   } catch (err: any) {

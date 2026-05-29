@@ -9,8 +9,10 @@ import {
 import {
   ArrowLeftOutlined, ArrowRightOutlined, ThunderboltOutlined, DownloadOutlined,
   SendOutlined, SaveOutlined, CheckCircleOutlined, ReloadOutlined,
-  BulbOutlined, HomeOutlined, CalculatorOutlined, FileTextOutlined, LinkOutlined,
+  BulbOutlined, HomeOutlined, CalculatorOutlined, FileTextOutlined, LinkOutlined, AimOutlined,
 } from '@ant-design/icons';
+import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RtTooltip,
   Legend, ReferenceLine, ResponsiveContainer,
@@ -26,6 +28,27 @@ import { api } from '../../lib/api';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
+
+function FlyTo({ lat, lng }: { lat: number; lng: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.flyTo([lat, lng], 19, { animate: true, duration: 1.5 });
+  }, [lat, lng, map]);
+  return null;
+}
+
+function MapEvents({ onMove }: { onMove: (lat: number, lng: number) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    const handler = () => {
+      const center = map.getCenter();
+      onMove(center.lat, center.lng);
+    };
+    map.on('moveend', handler);
+    return () => { map.off('moveend', handler); };
+  }, [map, onMove]);
+  return null;
+}
 
 const EMPTY_LAYOUT: PanelLayoutResult = { panels: [], count: 0, coveredAreaSqM: 0, coveredAreaSqFt: 0, layoutEfficiency: 0, roofAreaSqM: 0 };
 
@@ -84,6 +107,8 @@ interface ProposalState {
   // Step 1
   roofSections: RoofSection[];
   address: string;
+  lat: number;
+  lng: number;
   // Step 2
   monthlyBill: number;
   tariff: number;
@@ -175,7 +200,7 @@ export default function SolarDesigner() {
   const address = leadData?.address || leadData?.city || '';
 
   const [state, setState] = useState<ProposalState>({
-    roofSections: [], address,
+    roofSections: [], address, lat: 28.6139, lng: 77.2090,
     monthlyBill: 8000, tariff: 8, systemKw: 5,
     panelBrand: 'Waaree', panelModel: 'WS-540M',
     inverterBrand: 'Growatt', inverterModel: 'MID 10KTL3-X',
@@ -188,6 +213,34 @@ export default function SolarDesigner() {
     annualKwh: 0, annualSavings: 0, paybackYears: 0, irr: 0,
     lifetimeSavings: 0, co2Tonnes: 0, treesEquivalent: 0, emi: null,
   });
+
+  const [searchAddress, setSearchAddress] = useState(address);
+  const [isSearching, setIsSearching] = useState(false);
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
+
+  useEffect(() => {
+    if (leadData) {
+      set({ lat: leadData.lat || 28.6139, lng: leadData.lng || 77.2090 });
+      setSearchAddress(leadData.address || leadData.city || '');
+    }
+  }, [leadData]);
+
+  const handleGeocode = async () => {
+    if (!searchAddress) return;
+    setIsSearching(true);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchAddress)}&format=json&limit=1`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.length > 0) {
+        set({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   const set = (partial: Partial<ProposalState>) => setState(s => ({ ...s, ...partial }));
 
@@ -306,9 +359,9 @@ export default function SolarDesigner() {
         <Text type="secondary" className="text-xs">Auto-detect using satellite imagery coming soon — for now, trace manually for highest accuracy.</Text>
       </div>
       <RoofMapper
-        lat={leadData?.lat || 28.6139}
-        lng={leadData?.lng || 77.209}
-        address={address}
+        lat={state.lat}
+        lng={state.lng}
+        address={state.address}
         onChange={(sections) => set({ roofSections: sections })}
       />
       <div className="flex justify-end mt-4">
@@ -751,45 +804,12 @@ export default function SolarDesigner() {
       <div className="flex justify-between mt-2">
         <Button icon={<ArrowLeftOutlined />} onClick={() => setStep(2)}>Back</Button>
       </div>
-
-      {/* Send Modal */}
-      <Modal
-        open={sendModalOpen}
-        onCancel={() => setSendModalOpen(false)}
-        title="Send Proposal to Customer"
-        footer={null}
-        width={480}
-      >
-        <div className="space-y-4 py-2">
-          <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-            <div className="font-semibold text-green-800 mb-2">📱 WhatsApp Preview</div>
-            <div className="text-sm text-green-700">
-              Hi {leadData?.name || 'there'}, your solar proposal is ready!<br />
-              <strong>{fmtKw(state.systemKw)} system · Net cost {fmt(state.netCost)} · Payback {state.paybackYears} yrs</strong><br />
-              Click the link to view your detailed proposal: [PDF Link]
-            </div>
-          </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <div className="font-semibold text-blue-800 mb-2">📧 Email Preview</div>
-            <div className="text-sm text-blue-700">
-              <strong>Subject:</strong> Your Solar Proposal from Slar — {fmtKw(state.systemKw)} System<br /><br />
-              Dear {leadData?.name || 'Customer'},<br />
-              Please find your customized solar proposal attached. Our team will follow up shortly.
-            </div>
-          </div>
-          <Button type="primary" block size="large" icon={<SendOutlined />}
-            onClick={() => {
-              message.success('Proposal sent! Customer will receive on WhatsApp and email.');
-              setSendModalOpen(false);
-            }}>
-            Send Both (WhatsApp + Email)
-          </Button>
-        </div>
-      </Modal>
     </div>
   );
 
   // ─── Main Render ──────────────────────────────────────────────────────────
+
+
 
   const steps = [
     { title: 'Site Mapping', icon: <HomeOutlined />, content: Step1 },
@@ -820,6 +840,60 @@ export default function SolarDesigner() {
       <Steps current={step} onChange={setStep} items={steps.map((s, i) => ({ title: s.title, icon: s.icon, disabled: i > 1 && state.roofSections.length === 0 }))} className="mb-2" />
 
       {steps[step].content}
+
+      {/* Send Modal */}
+      <Modal title="Send Proposal" open={sendModalOpen} onCancel={() => setSendModalOpen(false)} onOk={() => {
+        message.success('Proposal sent successfully!');
+        setSendModalOpen(false);
+      }}>
+        <p>This will send an email with the proposal PDF attached to <strong>{leadData?.email || 'the customer'}</strong>.</p>
+        <p>Do you want to proceed?</p>
+      </Modal>
+
+      {/* Location Modal Popup */}
+      <Modal
+        title="Where are we installing?"
+        open={!locationConfirmed}
+        onCancel={() => {}}
+        closable={false}
+        maskClosable={false}
+        footer={null}
+        width={800}
+        destroyOnClose
+      >
+        <Text type="secondary" className="block mb-4">
+          Search for the address and drag the map to align the crosshair exactly on the roof.
+        </Text>
+        <div className="flex gap-2 mb-4">
+          <Input
+            placeholder="Enter address..."
+            value={searchAddress}
+            onChange={e => setSearchAddress(e.target.value)}
+            onPressEnter={handleGeocode}
+            size="large"
+          />
+          <Button type="primary" size="large" onClick={handleGeocode} loading={isSearching}>Search</Button>
+        </div>
+        <div className="relative w-full h-[400px] rounded-xl overflow-hidden shadow-sm border border-slate-200 mb-6">
+          <MapContainer center={[state.lat, state.lng]} zoom={19} scrollWheelZoom className="w-full h-full">
+            <TileLayer
+              url="https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+              subdomains={['0','1','2','3']}
+              attribution="Google Maps"
+              maxZoom={21}
+            />
+            <FlyTo lat={state.lat} lng={state.lng} />
+            <MapEvents onMove={(lat, lng) => set({ lat, lng })} />
+          </MapContainer>
+          {/* Crosshair Overlay */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[1000] pointer-events-none flex items-center justify-center drop-shadow-md">
+            <AimOutlined className="text-4xl text-blue-500" />
+          </div>
+        </div>
+        <Button type="primary" size="large" block icon={<ArrowRightOutlined />} onClick={() => setLocationConfirmed(true)}>
+          Confirm Location & Start Mapping
+        </Button>
+      </Modal>
     </div>
   );
 }

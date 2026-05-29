@@ -32,13 +32,16 @@ export function pointInPolygon(pt: Point2D, polygon: Point2D[]): boolean {
   return inside;
 }
 
-/** Check if all 4 corners of a rect are inside a polygon */
+/** Check if a rect is fully inside a polygon (checks corners, midpoints, and center for robustness) */
 export function rectFullyInPolygon(cx: number, cy: number, hw: number, hh: number, polygon: Point2D[]): boolean {
-  const corners: Point2D[] = [
-    { x: cx - hw, y: cy - hh }, { x: cx + hw, y: cy - hh },
-    { x: cx + hw, y: cy + hh }, { x: cx - hw, y: cy + hh },
+  const points: Point2D[] = [
+    { x: cx - hw, y: cy - hh }, { x: cx + hw, y: cy - hh }, // top corners
+    { x: cx + hw, y: cy + hh }, { x: cx - hw, y: cy + hh }, // bottom corners
+    { x: cx, y: cy - hh }, { x: cx, y: cy + hh },           // top/bottom midpoints
+    { x: cx - hw, y: cy }, { x: cx + hw, y: cy },           // left/right midpoints
+    { x: cx, y: cy }                                        // center
   ];
-  return corners.every(c => pointInPolygon(c, polygon));
+  return points.every(p => pointInPolygon(p, polygon));
 }
 
 /** Check if any corner of a rect overlaps a polygon */
@@ -179,3 +182,103 @@ export function shadowFreeRowSpacing(moduleLengthM: number, tiltDeg: number, lat
 export function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
+
+// =============================================================================
+// GEO COORDINATE ARCHITECTURE (WGS84 <-> ENU)
+// =============================================================================
+
+const WGS84_A = 6378137.0; // Semi-major axis
+const WGS84_B = 6356752.314245; // Semi-minor axis
+const WGS84_E2 = 1 - (WGS84_B * WGS84_B) / (WGS84_A * WGS84_A);
+
+/** Geodetic to Earth-Centered Earth-Fixed (ECEF) */
+export function geodeticToEcef(lat: number, lon: number, h: number) {
+  const latRad = lat * DEG;
+  const lonRad = lon * DEG;
+  const sinLat = Math.sin(latRad);
+  const N = WGS84_A / Math.sqrt(1 - WGS84_E2 * sinLat * sinLat);
+  const x = (N + h) * Math.cos(latRad) * Math.cos(lonRad);
+  const y = (N + h) * Math.cos(latRad) * Math.sin(lonRad);
+  const z = (N * (1 - WGS84_E2) + h) * sinLat;
+  return { x, y, z };
+}
+
+/** ECEF to East-North-Up (ENU) relative to a reference origin */
+export function ecefToEnu(x: number, y: number, z: number, lat0: number, lon0: number, h0: number) {
+  const ref = geodeticToEcef(lat0, lon0, h0);
+  const dx = x - ref.x;
+  const dy = y - ref.y;
+  const dz = z - ref.z;
+  
+  const latRad = lat0 * DEG;
+  const lonRad = lon0 * DEG;
+  const sinLat = Math.sin(latRad);
+  const cosLat = Math.cos(latRad);
+  const sinLon = Math.sin(lonRad);
+  const cosLon = Math.cos(lonRad);
+
+  const e = -sinLon * dx + cosLon * dy;
+  const n = -sinLat * cosLon * dx - sinLat * sinLon * dy + cosLat * dz;
+  const u = cosLat * cosLon * dx + cosLat * sinLon * dy + sinLat * dz;
+  
+  return { x: e, y: n, z: u }; // Mapping ENU to 3D Scene: x=East, y=North, z=Up
+}
+
+/** ECEF to Geodetic */
+export function ecefToGeodetic(x: number, y: number, z: number) {
+  const ep2 = (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_B * WGS84_B);
+  const p = Math.sqrt(x * x + y * y);
+  const th = Math.atan2(WGS84_A * z, WGS84_B * p);
+  const lonRad = Math.atan2(y, x);
+  const latRad = Math.atan2(z + ep2 * WGS84_B * Math.pow(Math.sin(th), 3), p - WGS84_E2 * WGS84_A * Math.pow(Math.cos(th), 3));
+  const sinLat = Math.sin(latRad);
+  const N = WGS84_A / Math.sqrt(1 - WGS84_E2 * sinLat * sinLat);
+  const h = p / Math.cos(latRad) - N;
+  return { lat: latRad / DEG, lon: lonRad / DEG, h };
+}
+
+/** ENU to ECEF */
+export function enuToEcef(e: number, n: number, u: number, lat0: number, lon0: number, h0: number) {
+  const latRad = lat0 * DEG;
+  const lonRad = lon0 * DEG;
+  const sinLat = Math.sin(latRad);
+  const cosLat = Math.cos(latRad);
+  const sinLon = Math.sin(lonRad);
+  const cosLon = Math.cos(lonRad);
+
+  const dx = -sinLon * e - sinLat * cosLon * n + cosLat * cosLon * u;
+  const dy = cosLon * e - sinLat * sinLon * n + cosLat * sinLon * u;
+  const dz = cosLat * n + sinLat * u;
+
+  const ref = geodeticToEcef(lat0, lon0, h0);
+  return { x: ref.x + dx, y: ref.y + dy, z: ref.z + dz };
+}
+
+/** WGS84 to Local ENU Coordinates */
+export function wgs84ToEnu(lat: number, lon: number, h: number, lat0: number, lon0: number, h0: number) {
+  const { x, y, z } = geodeticToEcef(lat, lon, h);
+  return ecefToEnu(x, y, z, lat0, lon0, h0);
+}
+
+/** Local ENU Coordinates to WGS84 */
+export function enuToWgs84(e: number, n: number, u: number, lat0: number, lon0: number, h0: number) {
+  const { x, y, z } = enuToEcef(e, n, u, lat0, lon0, h0);
+  return ecefToGeodetic(x, y, z);
+}
+
+/** Haversine formula for physical distance on Earth (meters) */
+export function geodesicDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLat = (lat2 - lat1) * DEG;
+  const dLon = (lon2 - lon1) * DEG;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * DEG) * Math.cos(lat2 * DEG) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return WGS84_A * c;
+}
+
+/** Get meters per pixel for Web Mercator at a given latitude and zoom level */
+export function getMercatorMetersPerPixel(lat: number, zoom: number): number {
+  return 156543.03392 * Math.cos(lat * DEG) / Math.pow(2, zoom);
+}
+

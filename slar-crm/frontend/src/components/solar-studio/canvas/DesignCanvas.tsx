@@ -6,8 +6,8 @@ import { useRef, useCallback, useEffect, useState } from 'react';
 import { Stage, Layer, Line, Circle, Rect, Text, Group, Arrow, Image as KonvaImage, Ellipse } from 'react-konva';
 import { useDesignStore, MODULE_DATABASE, INVERTER_DATABASE } from '../store/designStore';
 import type { Point2D, DesignRoof, DesignObstruction, DesignSubArray, ToolType } from '../store/types';
-import { uid, distance, isNearPoint, polygonArea, insetPolygon } from '../utils/geometry';
-import { solarAccessColor } from '../engine/SolarAccessEngine';
+import { uid, distance, isNearPoint, polygonArea, insetPolygon, getMercatorMetersPerPixel } from '../utils/geometry';
+import { irradianceAccessColor, solarAccessColor } from '../engine/SolarAccessEngine';
 import { runPlacement, autoRowSpacingPx } from '../engine/PlacementEngine';
 import {
   calculateShadowVector,
@@ -16,29 +16,6 @@ import {
   calculateTreeShadow,
 } from '../../../utils/solar-calculations';
 import Konva from 'konva';
-
-// ─── Irradiance color mapping (0.7–1.0 normalized) ───────────────────────────
-function irradianceColor(value: number): string {
-  // value: 0–100 solar access → normalize to 0.7–1.0
-  const t = Math.max(0, Math.min(1, (value - 70) / 30));
-  // gradient: red(0) → orange → yellow → yellow-green → green(1)
-  const stops = [
-    [239, 68, 68],   // red
-    [249, 115, 22],  // orange
-    [234, 179, 8],   // yellow
-    [132, 204, 22],  // yellow-green
-    [34, 197, 94],   // green
-  ];
-  const seg = t * (stops.length - 1);
-  const i = Math.min(Math.floor(seg), stops.length - 2);
-  const f = seg - i;
-  const [r1, g1, b1] = stops[i];
-  const [r2, g2, b2] = stops[i + 1];
-  const r = Math.round(r1 + (r2 - r1) * f);
-  const g = Math.round(g1 + (g2 - g1) * f);
-  const b = Math.round(b1 + (b2 - b1) * f);
-  return `rgb(${r},${g},${b})`;
-}
 
 const GRID_SIZE = 20;
 const ROOF_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
@@ -414,12 +391,15 @@ export default function DesignCanvas() {
     }
 
     if (tool === 'obstruction_tree') {
+      const newId = uid();
       store.addObstruction({
-        id: uid(), type: 'tree', roofId,
+        id: newId, type: 'tree', roofId,
         vertices: [], center: point, height: 5,
         trunkHeight: 3, crownHeight: 4, crownRadius: 2.5,
         treeModel: 'oak',
       });
+      store.setActiveTool('select');
+      store.selectObjects([newId], 'obstruction');
       return;
     }
 
@@ -699,7 +679,7 @@ export default function DesignCanvas() {
                     });
                   }}
                 >
-                  <Circle radius={crownR} fill="#16a34a33" stroke="#16a34a" strokeWidth={1.5}
+                  <Circle radius={crownR} fill="#16a34a33" stroke={isSelected ? '#fbbf24' : '#16a34a'} strokeWidth={isSelected ? 3 : 1.5}
                     id={obs.id} data-type="obstruction" />
                   <Circle radius={crownR * 0.35} fill="#8b6b4a55" stroke="#8b6b4a" strokeWidth={1} />
                   {store.layers.obstructionLabels && (
@@ -745,9 +725,10 @@ export default function DesignCanvas() {
 
             if (obs.type === 'handrail') {
               const flat = obs.vertices.flatMap(v => [v.x, v.y]);
+              const isSelected = store.selectedIds.includes(obs.id);
               return (
                 <Line key={obs.id} id={obs.id} data-type="obstruction"
-                  points={flat} stroke="#a855f7" strokeWidth={3} hitStrokeWidth={10} />
+                  points={flat} stroke={isSelected ? '#fbbf24' : '#eab308'} strokeWidth={3} hitStrokeWidth={10} />
               );
             }
 
@@ -770,9 +751,12 @@ export default function DesignCanvas() {
           <Layer listening={false}>
             {store.obstructions.map(obs => {
               const metersPerPixel = 1 / store.pxPerMeter;
+              const obstructionHeight = obs.type === 'tree'
+                ? (obs.trunkHeight || 3) + (obs.crownHeight || 4)
+                : obs.height || 1.5;
               const shadowVec = calculateShadowVector(
                 { azimuth: store.sunSimulation.sunAzimuth, elevation: store.sunSimulation.sunElevation, declination: 0, hourAngle: 0, isAboveHorizon: true },
-                obs.height || 1.5,
+                obstructionHeight,
                 metersPerPixel
               );
               if (shadowVec.length === 0) return null;
@@ -800,6 +784,7 @@ export default function DesignCanvas() {
                   <Ellipse key={`sh-${obs.id}`}
                     x={treeShadow.centerX} y={treeShadow.centerY}
                     radiusX={treeShadow.radiusX} radiusY={treeShadow.radiusY}
+                    rotation={store.sunSimulation.sunAzimuth}
                     fill="#00000055" stroke="transparent" />
                 );
               }
@@ -833,7 +818,7 @@ export default function DesignCanvas() {
               const solarPct = store.solarAccess[mod.id];
               // Irradiance map takes priority over solar access coloring
               const fill = store.irradianceMap.enabled && solarPct !== undefined
-                ? irradianceColor(solarPct)
+                ? irradianceAccessColor(solarPct)
                 : store.solarAccessRun && solarPct !== undefined
                   ? solarAccessColor(solarPct)
                   : '#1e3a5f';
@@ -842,10 +827,13 @@ export default function DesignCanvas() {
                   key={mod.id}
                   id={mod.id}
                   data-type="module"
-                  x={mod.x - mw / 2}
-                  y={mod.y - mh / 2}
+                  x={mod.x}
+                  y={mod.y}
+                  offsetX={mw / 2}
+                  offsetY={mh / 2}
                   width={mw}
                   height={mh}
+                  rotation={sa.azimuth - 180}
                   fill={fill}
                   stroke={isSelected ? '#fbbf24' : '#3b82f6'}
                   strokeWidth={isSelected ? 2 : 0.5}
@@ -1079,15 +1067,12 @@ export default function DesignCanvas() {
 
 const GMAPS_KEY = 'AIzaSyBg6TPDmHduPZdZmLWoFym6VUwUsvV-i8I';
 
-// At zoom 19, one tile covers ~300m. We fetch a 640x640 static map.
-// Google Static Maps: max 640x640 free, scale=2 gives 1280x1280
-const STATIC_COVERAGE_M = 300; // approx meters covered at zoom 19, 640px
-
+// Google Static Maps: max 640x640 free, scale=2 gives 1280x1280 image
 function SatelliteKonvaLayer({ lat, lng, pxPerMeter }: { lat: number; lng: number; pxPerMeter: number }) {
-  const [img, setImg] = useState<HTMLImageElement | null>(null);
+  const [img, setImg] = useState<HTMLImageElement | undefined>(undefined);
 
   useEffect(() => {
-    setImg(null);
+    setImg(undefined);
     // Build static maps URL — fetched directly, CORS allowed for img tags
     const url = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=19&size=640x640&scale=2&maptype=satellite&key=${GMAPS_KEY}`;
 
@@ -1103,10 +1088,13 @@ function SatelliteKonvaLayer({ lat, lng, pxPerMeter }: { lat: number; lng: numbe
     image.src = url;
   }, [lat, lng]);
 
-  if (!img) return null;
-
-  // Size in canvas pixels: STATIC_COVERAGE_M meters * pxPerMeter
-  const sizePx = STATIC_COVERAGE_M * pxPerMeter;
+  // Calculate accurate physical coverage based on zoom 19 and 640 map size.
+  // The 'size=640x640' dictates the coverage. 'scale=2' just returns a higher-res image for the same area.
+  const metersPerPixel = getMercatorMetersPerPixel(lat, 19);
+  const physicalWidthM = 640 * metersPerPixel;
+  
+  // Size in canvas units
+  const sizePx = physicalWidthM * pxPerMeter;
 
   return (
     <Layer listening={false}>

@@ -2,12 +2,21 @@
 // 3D View — Three.js Scene for the Design Studio
 // =============================================================================
 
-import { useMemo, useState, Suspense, useRef } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { useMemo, useState, Suspense, useRef, useEffect } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Sky, Environment, Text as DreiText, Line as DreiLine } from '@react-three/drei';
 import * as THREE from 'three';
+import earcut from 'earcut';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { useDesignStore, MODULE_DATABASE } from '../store/designStore';
-import { solarAccessColor } from '../engine/SolarAccessEngine';
+
+// Apply BVH globally to Three.js
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree as any;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree as any;
+THREE.Mesh.prototype.raycast = acceleratedRaycast as any;
+import { irradianceAccessColor, solarAccessColor } from '../engine/SolarAccessEngine';
+import { generateStructure, resolveMountingConfig } from '../engine/MountingStructureEngine';
+import type { StructuralMember, StructuralMaterial, StructuralAssembly, DesignSubArray } from '../store/types';
 
 export default function ThreeJSView() {
   const store = useDesignStore();
@@ -23,7 +32,7 @@ export default function ThreeJSView() {
 
   // Calculate irradiance based on time of day (simplified)
   const getIrradianceColor = (baseColor: string, hour: number) => {
-    if (!store.showIrradianceMap) return baseColor;
+    if (!store.irradianceMap.enabled && !store.showIrradianceMap) return baseColor;
     
     // Peak irradiance at noon, lower at morning/evening
     const peakHour = 12;
@@ -91,7 +100,7 @@ export default function ThreeJSView() {
       </button>
 
       {/* Irradiance Map Legend */}
-      {store.showIrradianceMap && (
+      {(store.irradianceMap.enabled || store.showIrradianceMap) && (
         <div style={{
           position: 'absolute',
           top: 24,
@@ -172,7 +181,7 @@ export default function ThreeJSView() {
           {store.roofs.map(roof => <Roof3D key={roof.id} roof={roof} pxPerMeter={store.pxPerMeter} hour={hour} getIrradianceColor={getIrradianceColor} />)}
 
           {/* Modules */}
-          {store.subArrays.map(sa => <SubArray3D key={sa.id} sa={sa} store={store} hour={hour} getIrradianceColor={getIrradianceColor} />)}
+          {store.subArrays.map(sa => <StructureSystem3D key={sa.id} sa={sa} store={store} hour={hour} getIrradianceColor={getIrradianceColor} />)}
 
           {/* Obstructions */}
           {store.obstructions.map(obs => <Obstruction3D key={obs.id} obs={obs} pxPerMeter={store.pxPerMeter} store={store} />)}
@@ -264,26 +273,60 @@ function Roof3D({ roof, pxPerMeter, hour, getIrradianceColor }: { roof: any; pxP
   const roofThickness = 0.2; // Roof slab thickness
   const baseHeight = roof.baseHeight || 0;
 
-  // Create building walls (extruded from ground to roof level)
-  const wallGeo = useMemo(() => {
-    return new THREE.ExtrudeGeometry(shape, { 
-      depth: buildingHeight,
-      bevelEnabled: false 
-    });
-  }, [shape, buildingHeight]);
+  // Create custom extruded geometry using earcut
+  const createExtrusion = (depth: number) => {
+    if (!roof.vertices || roof.vertices.length < 3) return new THREE.BufferGeometry();
+    const pts = roof.vertices.map((v: any) => ({ x: v.x / pxPerMeter, y: v.y / pxPerMeter }));
+    const centerX = pts.reduce((sum: number, p: any) => sum + p.x, 0) / pts.length;
+    const centerY = pts.reduce((sum: number, p: any) => sum + p.y, 0) / pts.length;
+    const localPts = pts.map((p: any) => ({ x: p.x - centerX, y: p.y - centerY }));
+    
+    const data: number[] = [];
+    localPts.forEach((p: any) => { data.push(p.x, p.y); });
+    
+    const triangles = earcut(data);
+    const vertices: number[] = [];
+    const indices: number[] = [];
+    
+    // Base vertices (Y=0)
+    for(let i=0; i<localPts.length; i++) vertices.push(localPts[i].x, 0, localPts[i].y);
+    // Top vertices (Y=depth)
+    for(let i=0; i<localPts.length; i++) vertices.push(localPts[i].x, depth, localPts[i].y);
+    
+    const topOffset = localPts.length;
+    
+    // Top face (reverse earcut winding to face +Y)
+    for(let i=0; i<triangles.length; i+=3) {
+      indices.push(triangles[i+2] + topOffset, triangles[i+1] + topOffset, triangles[i] + topOffset);
+    }
+    // Bottom face (faces -Y)
+    for(let i=0; i<triangles.length; i+=3) {
+      indices.push(triangles[i], triangles[i+1], triangles[i+2]);
+    }
+    // Walls
+    for(let i=0; i<localPts.length; i++) {
+      const next = (i + 1) % localPts.length;
+      indices.push(i, i + topOffset, next);
+      indices.push(next, i + topOffset, next + topOffset);
+    }
+    
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return geo;
+  };
 
-  // Create roof slab (thin extrusion for the roof surface)
-  const roofGeo = useMemo(() => {
-    return new THREE.ExtrudeGeometry(shape, { 
-      depth: roofThickness,
-      bevelEnabled: false 
-    });
-  }, [shape]);
+  // Create building walls (extruded from ground to roof level)
+  const wallGeo = useMemo(() => createExtrusion(buildingHeight), [roof.vertices, pxPerMeter, buildingHeight]);
+
+  // Create roof slab (using earcut for stable triangulation)
+  const roofGeo = useMemo(() => createExtrusion(roofThickness), [roof.vertices, pxPerMeter, roofThickness]);
 
   return (
     <group position={[center.x, 0, center.y]}>
-      {/* Building walls - rotated to stand vertical */}
-      <group rotation={[-Math.PI / 2, 0, 0]} position={[0, baseHeight, 0]}>
+      {/* Building walls */}
+      <group position={[0, baseHeight, 0]}>
         <mesh 
           geometry={wallGeo} 
           castShadow 
@@ -307,7 +350,7 @@ function Roof3D({ roof, pxPerMeter, hour, getIrradianceColor }: { roof: any; pxP
       </group>
 
       {/* Roof surface - positioned on top of walls */}
-      <group rotation={[-Math.PI / 2, 0, 0]} position={[0, baseHeight + buildingHeight, 0]}>
+      <group position={[0, baseHeight + buildingHeight, 0]}>
         <mesh 
           geometry={roofGeo} 
           castShadow 
@@ -330,11 +373,40 @@ function Roof3D({ roof, pxPerMeter, hour, getIrradianceColor }: { roof: any; pxP
           <lineBasicMaterial color={isSelected ? '#fbbf24' : '#1e293b'} />
         </lineSegments>
       </group>
+
+      {/* Parapet walls (if any) */}
+      {(roof.parapetHeight || 0) > 0 && (
+        <group position={[0, baseHeight + buildingHeight + roofThickness, 0]}>
+          {roof.vertices.map((v1: any, i: number) => {
+            const v2 = roof.vertices[(i + 1) % roof.vertices.length];
+            const p1 = new THREE.Vector3(v1.x / pxPerMeter - center.x, 0, v1.y / pxPerMeter - center.y);
+            const p2 = new THREE.Vector3(v2.x / pxPerMeter - center.x, 0, v2.y / pxPerMeter - center.y);
+            
+            const dir = p2.clone().sub(p1);
+            const len = dir.length();
+            const mid = p1.clone().add(p2).multiplyScalar(0.5);
+            
+            const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir.clone().normalize());
+            const euler = new THREE.Euler().setFromQuaternion(quaternion);
+
+            // 0.2m parapet thickness. length + thickness helps close corner gaps
+            const parapetHeight = roof.parapetHeight;
+            const parapetThickness = 0.2; 
+
+            return (
+              <mesh key={`parapet-${i}`} position={[mid.x, parapetHeight / 2, mid.z]} rotation={euler} castShadow receiveShadow>
+                <boxGeometry args={[len + parapetThickness, parapetHeight, parapetThickness]} />
+                <meshStandardMaterial color="#e5e7eb" roughness={0.9} />
+              </mesh>
+            );
+          })}
+        </group>
+      )}
     </group>
   );
 }
 
-function SubArray3D({ sa, store, hour, getIrradianceColor }: { sa: any; store: any; hour: number; getIrradianceColor: (color: string, hour: number) => string }) {
+function StructureSystem3D({ sa, store, hour, getIrradianceColor }: { sa: DesignSubArray; store: any; hour: number; getIrradianceColor: (color: string, hour: number) => string }) {
   const spec = MODULE_DATABASE.find((m: any) => m.id === sa.moduleSpecId);
   if (!spec) return null;
 
@@ -347,139 +419,347 @@ function SubArray3D({ sa, store, hour, getIrradianceColor }: { sa: any; store: a
   if (!roof) return null;
   
   const roofHeight = (roof.baseHeight || 0) + (roof.height || 3) + 0.2;
+  const mountingConfig = resolveMountingConfig(sa);
 
   // Convert tilt and azimuth to radians
-  const tiltRad = (sa.tilt || 0) * Math.PI / 180;
-  const azimuthRad = (sa.azimuth || 180) * Math.PI / 180;
-  
-  // Structure dimensions
-  const structureHeight = (sa.mountHeight || 0.5) + 0.3; // Taller structure (0.8m default)
-  const railWidth = 0.08; // Thicker rails
-  const legWidth = 0.06; // Thicker legs
-  const panelOffset = structureHeight * 0.7; // Panel sits higher on structure
+  const tiltRad = (mountingConfig.tilt || 0) * Math.PI / 180;
+  const azimuthRad = (mountingConfig.azimuth || 180) * Math.PI / 180;
+  const panelTiltRad = mountingConfig.structureType === 'sat_single_axis' || mountingConfig.structureType === 'east_west' ? 0 : tiltRad;
+
+  const panelGeo = useMemo(() => {
+    const panel = new THREE.BoxGeometry(pw, 0.04, ph);
+    panel.rotateX(-panelTiltRad);
+    return panel;
+  }, [pw, ph, panelTiltRad]);
+
+  const assembly: StructuralAssembly = useMemo(() => generateStructure({
+    subArray: sa,
+    moduleSpec: spec,
+    pxPerMeter: store.pxPerMeter,
+    baseElevationM: roofHeight,
+  }), [sa, spec, store.pxPerMeter, roofHeight]);
+
+  const panelRef = useRef<THREE.InstancedMesh>(null);
+  const panelSeats = useMemo(() => buildPanelSeatMap(sa, store.pxPerMeter, ph, roofHeight, mountingConfig.groundClearanceM, tiltRad, mountingConfig.railSectionH / 1000, mountingConfig.structureType), [sa, store.pxPerMeter, ph, roofHeight, mountingConfig.groundClearanceM, mountingConfig.railSectionH, mountingConfig.structureType, tiltRad]);
+  const eastWestTilts = useMemo(() => buildEastWestPanelTiltMap(sa, store.pxPerMeter, tiltRad), [sa, store.pxPerMeter, tiltRad]);
+
+  // Update instance matrices and colors
+  useEffect(() => {
+    if (!panelRef.current || !sa.modules) return;
+    
+    const dummy = new THREE.Object3D();
+    const colorObj = new THREE.Color();
+    
+    sa.modules.forEach((mod: any, i: number) => {
+      const seatY = panelSeats.get(mod.id) ?? roofHeight + mountingConfig.groundClearanceM + 0.08;
+      dummy.position.set(mod.x / store.pxPerMeter, seatY, mod.y / store.pxPerMeter);
+      dummy.rotation.set(eastWestTilts.get(mod.id) ?? 0, azimuthRad - Math.PI, 0);
+      dummy.updateMatrix();
+      
+      panelRef.current!.setMatrixAt(i, dummy.matrix);
+      
+      // Determine color
+      const saPct = store.solarAccess[mod.id];
+      let colorStr = '#2563eb';
+      if (store.irradianceMap.enabled && saPct !== undefined) {
+        colorStr = irradianceAccessColor(saPct);
+      } else if (store.solarAccessRun && saPct !== undefined) {
+        colorStr = solarAccessColor(saPct);
+      } else if (store.irradianceMap.enabled || store.showIrradianceMap) {
+        colorStr = getIrradianceColor('#2563eb', hour);
+      }
+      
+      colorObj.set(colorStr);
+      panelRef.current!.setColorAt(i, colorObj);
+    });
+    
+    panelRef.current.instanceMatrix.needsUpdate = true;
+    if (panelRef.current.instanceColor) panelRef.current.instanceColor.needsUpdate = true;
+  }, [sa.modules, roofHeight, azimuthRad, store.pxPerMeter, store.solarAccess, store.solarAccessRun, store.showIrradianceMap, store.irradianceMap.enabled, getIrradianceColor, hour, panelSeats, eastWestTilts, mountingConfig.groundClearanceM]);
+
+  return (
+    <group>
+      <instancedMesh ref={panelRef} args={[panelGeo, undefined, sa.modules.length]} castShadow receiveShadow>
+        <meshPhysicalMaterial 
+          metalness={0.7} 
+          roughness={0.15} 
+          clearcoat={1}
+          clearcoatRoughness={0.1}
+        />
+      </instancedMesh>
+      <StructureMemberInstances assembly={assembly} structureType={mountingConfig.structureType} />
+      {assembly.foundations.map((foundation, index) => (
+        <Foundation3D key={`${sa.id}-foundation-${index}`} foundation={foundation} />
+      ))}
+    </group>
+  );
+}
+
+function StructureMemberInstances({ assembly, structureType }: { assembly: StructuralAssembly; structureType?: string }) {
+  const staticMembers = assembly.members.filter(m => !(structureType === 'sat_single_axis' && ['torque_tube', 'bearing', 'drive_unit'].includes(m.type)));
+  const trackerMembers = assembly.members.filter(m => structureType === 'sat_single_axis' && ['torque_tube', 'bearing', 'drive_unit'].includes(m.type));
 
   return (
     <>
-      {sa.modules.map((mod: any) => {
-        const saPct = store.solarAccess[mod.id];
-        let color = '#2563eb';
-        
-        // Priority: Solar Access > Irradiance Map > Default
-        if (store.solarAccessRun && saPct !== undefined) {
-          color = solarAccessColor(saPct);
-        } else if (store.showIrradianceMap) {
-          color = getIrradianceColor('#2563eb', hour);
-        }
-        
-        const moduleHeight = roofHeight;
-        
-        // Geometry constraints
-        const structureHeight = (sa.mountHeight || 0.5) + 0.1; // Center point elevation
-        const railWidth = 0.05;
-        const legWidth = 0.05;
-        const legOffsetZ = ph * 0.35;
-        const legOffsetX = pw * 0.35;
-        
-        // Dynamic leg heights to adapt seamlessly to panel tilt
-        const frontLegHeight = structureHeight - legOffsetZ * Math.sin(tiltRad);
-        const backLegHeight  = structureHeight + legOffsetZ * Math.sin(tiltRad);
-        
-        const validFrontH = Math.max(0.05, frontLegHeight);
-        const validBackH = Math.max(0.05, backLegHeight);
-        
-        return (
-          <group 
-            key={mod.id} 
-            position={[
-              mod.x / store.pxPerMeter, 
-              moduleHeight, 
-              mod.y / store.pxPerMeter
-            ]}
-            rotation={[0, azimuthRad - Math.PI, 0]}
-          >
-            {/* TILTED ASSEMBLY: Panel + Upper Rails */}
-            <group position={[0, structureHeight, 0]} rotation={[tiltRad, 0, 0]}>
-              {/* The Solar Panel */}
-              <group position={[0, railWidth / 2 + 0.02, 0]}>
-                <mesh castShadow receiveShadow>
-                  <boxGeometry args={[pw, 0.04, ph]} />
-                  <meshPhysicalMaterial 
-                    color={color} 
-                    metalness={0.7} 
-                    roughness={0.15} 
-                    clearcoat={1}
-                    clearcoatRoughness={0.1}
-                    emissive={color}
-                    emissiveIntensity={0.1}
-                  />
-                </mesh>
-                <lineSegments>
-                  <edgesGeometry args={[new THREE.BoxGeometry(pw, 0.04, ph)]} />
-                  <lineBasicMaterial color="#1e40af" />
-                </lineSegments>
-              </group>
-              
-              {/* Upper Mounting Rails (flush underneath panel) */}
-              <mesh position={[0, 0, legOffsetZ]} castShadow>
-                <boxGeometry args={[pw * 0.85, railWidth, railWidth]} />
-                <meshStandardMaterial color="#6b7280" metalness={0.85} roughness={0.25} />
-              </mesh>
-              <mesh position={[0, 0, -legOffsetZ]} castShadow>
-                <boxGeometry args={[pw * 0.85, railWidth, railWidth]} />
-                <meshStandardMaterial color="#6b7280" metalness={0.85} roughness={0.25} />
-              </mesh>
-              
-              {/* Cross Beams connecting upper rails */}
-              <mesh position={[-legOffsetX, 0, 0]} castShadow>
-                <boxGeometry args={[railWidth, railWidth, ph * 0.7]} />
-                <meshStandardMaterial color="#6b7280" metalness={0.85} roughness={0.25} />
-              </mesh>
-              <mesh position={[legOffsetX, 0, 0]} castShadow>
-                <boxGeometry args={[railWidth, railWidth, ph * 0.7]} />
-                <meshStandardMaterial color="#6b7280" metalness={0.85} roughness={0.25} />
-              </mesh>
-            </group>
-
-            {/* STATIC ASSEMBLY: Flat Base on Roof + Vertical Legs reaching up */}
-            <group>
-              {/* Front Base Rail */}
-              <mesh position={[0, 0.02, legOffsetZ * Math.cos(tiltRad)]} castShadow>
-                <boxGeometry args={[pw * 0.9, 0.04, railWidth]} />
-                <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.3} />
-              </mesh>
-              
-              {/* Back Base Rail */}
-              <mesh position={[0, 0.02, -legOffsetZ * Math.cos(tiltRad)]} castShadow>
-                <boxGeometry args={[pw * 0.9, 0.04, railWidth]} />
-                <meshStandardMaterial color="#374151" metalness={0.8} roughness={0.3} />
-              </mesh>
-              
-              {/* Front Legs */}
-              <mesh position={[-legOffsetX, validFrontH / 2, legOffsetZ * Math.cos(tiltRad)]} castShadow>
-                <boxGeometry args={[legWidth, validFrontH, legWidth]} />
-                <meshStandardMaterial color="#4b5563" metalness={0.7} roughness={0.4} />
-              </mesh>
-              <mesh position={[legOffsetX, validFrontH / 2, legOffsetZ * Math.cos(tiltRad)]} castShadow>
-                <boxGeometry args={[legWidth, validFrontH, legWidth]} />
-                <meshStandardMaterial color="#4b5563" metalness={0.7} roughness={0.4} />
-              </mesh>
-              
-              {/* Back Legs */}
-              <mesh position={[-legOffsetX, validBackH / 2, -legOffsetZ * Math.cos(tiltRad)]} castShadow>
-                <boxGeometry args={[legWidth, validBackH, legWidth]} />
-                <meshStandardMaterial color="#4b5563" metalness={0.7} roughness={0.4} />
-              </mesh>
-              <mesh position={[legOffsetX, validBackH / 2, -legOffsetZ * Math.cos(tiltRad)]} castShadow>
-                <boxGeometry args={[legWidth, validBackH, legWidth]} />
-                <meshStandardMaterial color="#4b5563" metalness={0.7} roughness={0.4} />
-              </mesh>
-            </group>
-            
-          </group>
-        );
-      })}
+      <MemberBatch members={staticMembers} />
+      {trackerMembers.length > 0 && (
+        <TrackerRotatingGroup members={trackerMembers} />
+      )}
     </>
   );
+}
+
+function buildPanelSeatMap(
+  subArray: DesignSubArray,
+  pxPerMeter: number,
+  moduleHeightM: number,
+  roofHeight: number,
+  groundClearanceM: number,
+  tiltRad: number,
+  railHeightM: number,
+  structureType: string,
+): Map<string, number> {
+  const seats = new Map<string, number>();
+  const grouped = new Map<string, DesignSubArray['modules']>();
+
+  for (const module of subArray.modules) {
+    const tableR = Math.floor(module.row / Math.max(subArray.tableRows, 1));
+    const tableC = Math.floor(module.col / Math.max(subArray.tableCols, 1));
+    const key = `${tableR}:${tableC}`;
+    grouped.set(key, [...(grouped.get(key) || []), module]);
+  }
+
+  for (const modules of grouped.values()) {
+    const zs = modules.map(module => module.y / pxPerMeter);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const centerZ = (minZ + maxZ) / 2;
+    const tableHeight = Math.max(moduleHeightM, maxZ - minZ + moduleHeightM);
+    const railTopOffset = railHeightM / 2 + 0.035;
+    const trackerSeatY = roofHeight + groundClearanceM + 0.35 + railHeightM * 1.25 + 0.035;
+    const eastWestRidgeY = roofHeight + groundClearanceM + 0.35;
+
+    for (const module of modules) {
+      if (structureType === 'sat_single_axis') {
+        seats.set(module.id, trackerSeatY);
+        continue;
+      }
+
+      if (structureType === 'ballasted_roof') {
+        seats.set(module.id, roofHeight + groundClearanceM + railTopOffset);
+        continue;
+      }
+
+      if (structureType === 'east_west') {
+        const localZ = module.y / pxPerMeter - centerZ;
+        seats.set(module.id, eastWestRidgeY - Math.abs(localZ) * Math.sin(tiltRad) + railTopOffset);
+        continue;
+      }
+
+      const localZ = module.y / pxPerMeter - centerZ;
+      const supportPlaneY = roofHeight + groundClearanceM + (localZ + tableHeight / 2) * Math.sin(tiltRad);
+      seats.set(module.id, supportPlaneY + railTopOffset);
+    }
+  }
+
+  return seats;
+}
+
+function buildEastWestPanelTiltMap(subArray: DesignSubArray, pxPerMeter: number, tiltRad: number): Map<string, number> {
+  const tilts = new Map<string, number>();
+  if (resolveMountingConfig(subArray).structureType !== 'east_west') return tilts;
+
+  const grouped = new Map<string, DesignSubArray['modules']>();
+  for (const module of subArray.modules) {
+    const tableR = Math.floor(module.row / Math.max(subArray.tableRows, 1));
+    const tableC = Math.floor(module.col / Math.max(subArray.tableCols, 1));
+    const key = `${tableR}:${tableC}`;
+    grouped.set(key, [...(grouped.get(key) || []), module]);
+  }
+
+  for (const modules of grouped.values()) {
+    const zs = modules.map(module => module.y / pxPerMeter);
+    const centerZ = (Math.min(...zs) + Math.max(...zs)) / 2;
+    for (const module of modules) {
+      const localZ = module.y / pxPerMeter - centerZ;
+      tilts.set(module.id, localZ < 0 ? -tiltRad : tiltRad);
+    }
+  }
+
+  return tilts;
+}
+
+function TrackerRotatingGroup({ members }: { members: StructuralMember[] }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const hour = useDesignStore(s => s.sunSimulation.hour);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    const rotationDeg = THREE.MathUtils.clamp((hour - 12) * 7.5, -45, 45);
+    groupRef.current.rotation.x = THREE.MathUtils.degToRad(rotationDeg);
+  });
+
+  const center = useMemo(() => {
+    const tube = members.find(m => m.type === 'torque_tube') || members[0];
+    return tube
+      ? new THREE.Vector3((tube.start[0] + tube.end[0]) / 2, (tube.start[1] + tube.end[1]) / 2, (tube.start[2] + tube.end[2]) / 2)
+      : new THREE.Vector3();
+  }, [members]);
+
+  const localMembers = useMemo(() => members.map(m => ({
+    ...m,
+    start: [m.start[0] - center.x, m.start[1] - center.y, m.start[2] - center.z] as [number, number, number],
+    end: [m.end[0] - center.x, m.end[1] - center.y, m.end[2] - center.z] as [number, number, number],
+  })), [members, center]);
+
+  return (
+    <group ref={groupRef} position={center}>
+      <MemberBatch members={localMembers} />
+    </group>
+  );
+}
+
+function MemberBatch({ members }: { members: StructuralMember[] }) {
+  const grouped = useMemo(() => {
+    const map = new Map<string, StructuralMember[]>();
+    for (const member of members) {
+      const key = `${member.type}:${member.material}:${memberProfile(member.type)}`;
+      map.set(key, [...(map.get(key) || []), member]);
+    }
+    return Array.from(map.entries());
+  }, [members]);
+
+  return (
+    <>
+      {grouped.map(([key, batch]) => (
+        <InstancedMemberGroup key={key} members={batch} material={batch[0].material} type={batch[0].type} />
+      ))}
+    </>
+  );
+}
+
+function InstancedMemberGroup({ members, material, type }: { members: StructuralMember[]; material: StructuralMaterial; type: StructuralMember['type'] }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const xAxis = useMemo(() => new THREE.Vector3(1, 0, 0), []);
+  const yAxis = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  const profile = memberProfile(type);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    members.forEach((member, index) => {
+      const start = new THREE.Vector3(...member.start);
+      const end = new THREE.Vector3(...member.end);
+      const dir = end.clone().sub(start);
+      const length = Math.max(dir.length(), 0.03);
+      const mid = start.clone().add(end).multiplyScalar(0.5);
+      dummy.position.copy(mid);
+      const normalized = dir.normalize();
+      if (profile === 'round') {
+        const diameter = Math.max(member.sectionW, member.sectionH);
+        dummy.quaternion.setFromUnitVectors(yAxis, normalized);
+        dummy.scale.set(diameter, length, diameter);
+      } else {
+        dummy.quaternion.setFromUnitVectors(xAxis, normalized);
+        dummy.scale.set(length, member.sectionH, member.sectionW);
+      }
+      dummy.updateMatrix();
+      ref.current!.setMatrixAt(index, dummy.matrix);
+    });
+    ref.current.instanceMatrix.needsUpdate = true;
+  }, [members, dummy, xAxis, yAxis, profile]);
+
+  return (
+    <instancedMesh ref={ref} args={[undefined, undefined, members.length]} castShadow receiveShadow>
+      {profile === 'round'
+        ? <cylinderGeometry args={[0.5, 0.5, 1, type === 'torque_tube' ? 32 : 18]} />
+        : <boxGeometry args={[1, 1, 1]} />}
+      <meshStandardMaterial {...materialProps(material)} />
+    </instancedMesh>
+  );
+}
+
+function Foundation3D({ foundation }: { foundation: StructuralAssembly['foundations'][number] }) {
+  const baseY = foundation.elevationM ?? 0;
+  const y = baseY - Math.max(foundation.depthM, 0.05) / 2;
+  if (foundation.type === 'ballast') {
+    return (
+      <group position={[foundation.positionX, baseY, foundation.positionZ]}>
+        <mesh position={[0, 0.09, 0]} castShadow receiveShadow>
+          <boxGeometry args={[foundation.widthM * 1.05, 0.18, foundation.widthM * 0.5]} />
+          <meshStandardMaterial color="#a3a3a3" roughness={0.95} />
+        </mesh>
+        <mesh position={[0, 0.195, 0]} castShadow receiveShadow>
+          <boxGeometry args={[foundation.widthM * 0.65, 0.03, foundation.widthM * 0.32]} />
+          <meshStandardMaterial color="#71717a" metalness={0.35} roughness={0.45} />
+        </mesh>
+      </group>
+    );
+  }
+
+  if (foundation.type === 'l_foot' || foundation.type === 'roof_hook') {
+    return (
+      <group position={[foundation.positionX, baseY, foundation.positionZ]}>
+        <mesh position={[0, 0.025, 0]} castShadow receiveShadow>
+          <boxGeometry args={[foundation.widthM, 0.05, foundation.widthM * 0.58]} />
+          <meshStandardMaterial color="#cbd5e1" metalness={0.7} roughness={0.22} />
+        </mesh>
+        <mesh position={[0, 0.11, -foundation.widthM * 0.18]} castShadow receiveShadow>
+          <boxGeometry args={[foundation.widthM * 0.24, 0.18, 0.035]} />
+          <meshStandardMaterial color="#e2e8f0" metalness={0.75} roughness={0.2} />
+        </mesh>
+        <mesh position={[foundation.widthM * 0.28, 0.058, foundation.widthM * 0.18]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.018, 0.018, 0.012, 12]} />
+          <meshStandardMaterial color="#334155" metalness={0.9} roughness={0.2} />
+        </mesh>
+        <mesh position={[-foundation.widthM * 0.28, 0.058, foundation.widthM * 0.18]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.018, 0.018, 0.012, 12]} />
+          <meshStandardMaterial color="#334155" metalness={0.9} roughness={0.2} />
+        </mesh>
+      </group>
+    );
+  }
+
+  return (
+    <group position={[foundation.positionX, 0, foundation.positionZ]}>
+      <mesh position={[0, y, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[foundation.widthM / 2, foundation.widthM / 2, Math.max(foundation.depthM, 0.35), 24]} />
+        <meshStandardMaterial color={foundation.type === 'rcc_footing' ? '#8b8f98' : '#475569'} metalness={foundation.type === 'rcc_footing' ? 0 : 0.55} roughness={0.72} />
+      </mesh>
+      {foundation.type === 'screw_pile' && [0.35, 0.6, 0.85].map(offset => (
+        <mesh key={offset} position={[0, baseY - offset, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
+          <torusGeometry args={[foundation.widthM * 0.32, 0.012, 8, 28]} />
+          <meshStandardMaterial color="#64748b" metalness={0.65} roughness={0.35} />
+        </mesh>
+      ))}
+      <mesh position={[0, baseY + 0.025, 0]} castShadow receiveShadow>
+        <boxGeometry args={[foundation.widthM * 1.15, 0.05, foundation.widthM * 1.15]} />
+        <meshStandardMaterial color="#64748b" metalness={0.65} roughness={0.32} />
+      </mesh>
+    </group>
+  );
+}
+
+type MemberProfile = 'round' | 'rect';
+
+function memberProfile(type: StructuralMember['type']): MemberProfile {
+  if (['column', 'brace', 'torque_tube', 'bearing'].includes(type)) return 'round';
+  return 'rect';
+}
+
+function materialProps(material: StructuralMaterial): THREE.MeshStandardMaterialParameters {
+  switch (material) {
+    case 'aluminum':
+      return { color: '#d7dee4', metalness: 0.88, roughness: 0.18, envMapIntensity: 0.7 };
+    case 'steel_galv':
+      return { color: '#52616f', metalness: 0.82, roughness: 0.28, envMapIntensity: 0.55 };
+    case 'stainless':
+      return { color: '#f1f5f9', metalness: 0.94, roughness: 0.16, envMapIntensity: 0.8 };
+    case 'concrete':
+      return { color: '#a3a3a3', metalness: 0, roughness: 0.96 };
+    default:
+      return { color: '#64748b', metalness: 0.6, roughness: 0.35 };
+  }
 }
 
 function Obstruction3D({ obs, pxPerMeter, store }: { obs: any; pxPerMeter: number; store: any }) {
@@ -500,32 +780,152 @@ function Obstruction3D({ obs, pxPerMeter, store }: { obs: any; pxPerMeter: numbe
     const tH = obs.trunkHeight || 3;
     const cH = obs.crownHeight || 4;
     const cR = obs.crownRadius || 2.5;
+    const type = obs.treeModel || 'oak';
+    
+    const crownColor = type === 'pine' || type === 'conifer' ? '#2d5a27' : '#3a5f0b';
+
     return (
       <group position={[obs.center.x / pxPerMeter, roofHeight, obs.center.y / pxPerMeter]}>
         {/* Trunk */}
-        <mesh position={[0, tH / 2, 0]} castShadow>
-          <cylinderGeometry args={[0.15, 0.2, tH, 8]} />
-          <meshStandardMaterial color="#8b6b4a" />
+        <mesh position={[0, tH / 2, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[cR * 0.1, cR * 0.15, tH, 8]} />
+          <meshStandardMaterial color="#5c4033" roughness={0.9} />
         </mesh>
-        {/* Crown */}
-        <mesh position={[0, tH + cH / 2, 0]} castShadow>
-          <sphereGeometry args={[cR, 12, 12]} />
-          <meshStandardMaterial color="#16a34a" opacity={0.7} transparent />
-        </mesh>
+        
+        {/* Crown (Simplified declarative version for stability) */}
+        {(type === 'pine' || type === 'conifer') ? (
+          <group>
+            {[0, 1, 2].map(i => (
+              <mesh key={i} position={[0, tH + i * (cH * 0.25) + (cH * 0.5) / 2, 0]} castShadow receiveShadow>
+                <coneGeometry args={[cR * (1 - i * 0.25), cH * 0.5, 16]} />
+                <meshStandardMaterial color={crownColor} roughness={0.8} transparent opacity={0.95} />
+              </mesh>
+            ))}
+          </group>
+        ) : (
+          <mesh position={[0, tH + cH / 2, 0]} scale={[cR, cH / 2, cR]} castShadow receiveShadow>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshStandardMaterial color={crownColor} roughness={0.8} transparent opacity={0.95} />
+          </mesh>
+        )}
       </group>
     );
   }
 
   if (obs.type === 'handrail' && obs.vertices.length >= 2) {
-    const points = obs.vertices.map((v: any) =>
-      new THREE.Vector3(v.x / pxPerMeter, roofHeight + (obs.height || 0.9), v.y / pxPerMeter)
-    );
-    const curve = new THREE.CatmullRomCurve3(points, false);
-    const geo = new THREE.TubeGeometry(curve, 20, 0.03, 8, false);
+    const height = obs.height || 1.1; // 1.1m is standard handrail height
+    const railColor = "#eab308"; // Safety Yellow
+    const baseColor = "#64748b"; // Industrial Grey
+    const postSpacing = 1.5; // meters between posts
+
+    const roofTop = roofHeight + 0.2; // 0.2 is the roof slab thickness, bases must sit on top
+    const posts: THREE.Vector3[] = [];
+    const segments: { start: THREE.Vector3; end: THREE.Vector3; length: number }[] = [];
+
+    // For each segment in the polyline
+    for (let i = 0; i < obs.vertices.length - 1; i++) {
+      const v1 = new THREE.Vector3(obs.vertices[i].x / pxPerMeter, roofTop, obs.vertices[i].y / pxPerMeter);
+      const v2 = new THREE.Vector3(obs.vertices[i+1].x / pxPerMeter, roofTop, obs.vertices[i+1].y / pxPerMeter);
+      
+      const dir = v2.clone().sub(v1);
+      const len = dir.length();
+      const norm = dir.clone().normalize();
+      
+      segments.push({ start: v1, end: v2, length: len });
+      
+      // Always put a post at the start vertex
+      posts.push(v1.clone());
+      
+      // Distribute posts evenly along the segment
+      const numPosts = Math.floor(len / postSpacing);
+      if (numPosts > 0) {
+        const actualSpacing = len / (numPosts + 1);
+        for (let j = 1; j <= numPosts; j++) {
+          posts.push(v1.clone().add(norm.clone().multiplyScalar(j * actualSpacing)));
+        }
+      }
+      
+      // The end vertex will be handled by the next segment's start vertex,
+      // EXCEPT for the last segment where we must explicitly add the final post
+      if (i === obs.vertices.length - 2) {
+        posts.push(v2.clone());
+      }
+    }
+
     return (
-      <mesh geometry={geo} castShadow>
-        <meshStandardMaterial color="#a855f7" metalness={0.6} roughness={0.3} />
-      </mesh>
+      <group>
+        {/* Draw straight rail segments instead of a continuous spline to prevent overshoot artifacts */}
+        {segments.map((seg, idx) => {
+          const mid = seg.start.clone().add(seg.end).multiplyScalar(0.5);
+          const topMid = new THREE.Vector3(mid.x, mid.y + height, mid.z);
+          const midMid = new THREE.Vector3(mid.x, mid.y + height / 2, mid.z);
+          
+          // Rotation to align cylinder with the segment
+          const dir = seg.end.clone().sub(seg.start).normalize();
+          const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+          const euler = new THREE.Euler().setFromQuaternion(quaternion);
+
+          return (
+            <group key={`seg-${idx}`}>
+              {/* Top Rail Segment */}
+              <mesh position={[topMid.x, topMid.y, topMid.z]} rotation={euler} castShadow>
+                <cylinderGeometry args={[0.025, 0.025, seg.length, 8]} />
+                <meshStandardMaterial color={railColor} metalness={0.3} roughness={0.5} />
+              </mesh>
+              {/* Mid Rail Segment */}
+              <mesh position={[midMid.x, midMid.y, midMid.z]} rotation={euler} castShadow>
+                <cylinderGeometry args={[0.02, 0.02, seg.length, 8]} />
+                <meshStandardMaterial color={railColor} metalness={0.3} roughness={0.5} />
+              </mesh>
+              
+              {/* Corner joints (spheres) to make corners look smooth and connected */}
+              <mesh position={[seg.start.x, seg.start.y + height, seg.start.z]} castShadow>
+                <sphereGeometry args={[0.025, 8, 8]} />
+                <meshStandardMaterial color={railColor} metalness={0.3} roughness={0.5} />
+              </mesh>
+              <mesh position={[seg.start.x, seg.start.y + height / 2, seg.start.z]} castShadow>
+                <sphereGeometry args={[0.02, 8, 8]} />
+                <meshStandardMaterial color={railColor} metalness={0.3} roughness={0.5} />
+              </mesh>
+              
+              {/* End joint for the very last segment */}
+              {idx === segments.length - 1 && (
+                <>
+                  <mesh position={[seg.end.x, seg.end.y + height, seg.end.z]} castShadow>
+                    <sphereGeometry args={[0.025, 8, 8]} />
+                    <meshStandardMaterial color={railColor} metalness={0.3} roughness={0.5} />
+                  </mesh>
+                  <mesh position={[seg.end.x, seg.end.y + height / 2, seg.end.z]} castShadow>
+                    <sphereGeometry args={[0.02, 8, 8]} />
+                    <meshStandardMaterial color={railColor} metalness={0.3} roughness={0.5} />
+                  </mesh>
+                </>
+              )}
+            </group>
+          );
+        })}
+
+        {/* Posts and Bases */}
+        {posts.map((pos, idx) => (
+          <group key={`post-${idx}`} position={[pos.x, pos.y, pos.z]}>
+            {/* Post pole (yellow) */}
+            <mesh position={[0, height / 2, 0]} castShadow>
+              <cylinderGeometry args={[0.025, 0.025, height, 8]} />
+              <meshStandardMaterial color={railColor} metalness={0.3} roughness={0.5} />
+            </mesh>
+            {/* Post Base Collar (grey) */}
+            <mesh position={[0, 0.08, 0]} castShadow>
+              <cylinderGeometry args={[0.028, 0.03, 0.16, 8]} />
+              <meshStandardMaterial color={baseColor} metalness={0.6} roughness={0.6} />
+            </mesh>
+            {/* Flat Base Plate (grey) */}
+            <mesh position={[0, 0.01, 0]} castShadow>
+              <boxGeometry args={[0.25, 0.02, 0.25]} />
+              <meshStandardMaterial color={baseColor} metalness={0.6} roughness={0.6} />
+            </mesh>
+          </group>
+        ))}
+      </group>
     );
   }
 

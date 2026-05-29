@@ -5,11 +5,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Search, MapPin } from 'lucide-react';
 
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBg6TPDmHduPZdZmLWoFym6VUwUsvV-i8I';
+const GOOGLE_MAPS_API_KEY = 'AIzaSyDTFhd1yvsVjtVAb34likh6mAoggFibyAM';
 
 interface LocationSelectorProps {
   onClose: () => void;
-  onLocationSelect: (data: { address: string; lat: number; lng: number; imageUrl: string }) => void;
+  onLocationSelect: (data: { address: string; lat: number; lng: number; elevation: number; imageUrl: string }) => void;
 }
 
 // Load Google Maps script once
@@ -44,7 +44,7 @@ export default function LocationSelector({ onClose, onLocationSelect }: Location
   const [searchText, setSearchText] = useState('');
   const [lat, setLat] = useState('');
   const [lng, setLng] = useState('');
-  const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number; elevation: number; address: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -74,7 +74,17 @@ export default function LocationSelector({ onClose, onLocationSelect }: Location
     setLat(latitude.toFixed(6));
     setLng(longitude.toFixed(6));
     setSearchText(address);
-    setSelectedLocation({ lat: latitude, lng: longitude, address });
+    const elevator = new google.maps.ElevationService();
+    elevator.getElevationForLocations({
+      locations: [pos]
+    }, (results: any, status: any) => {
+      let elevation = 0;
+      if (status === 'OK' && results && results[0]) {
+        elevation = results[0].elevation;
+      }
+      setSelectedLocation({ lat: latitude, lng: longitude, elevation, address });
+    });
+
   }, []);
 
   useEffect(() => {
@@ -161,14 +171,14 @@ export default function LocationSelector({ onClose, onLocationSelect }: Location
 
   const handleConfirm = () => {
     if (!selectedLocation) return;
-    const { lat, lng, address } = selectedLocation;
+    const { lat, lng, elevation, address } = selectedLocation;
 
     // Google Static Maps API for satellite cutout
     const zoom = 19;
     const size = '800x800';
     const imageUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=${zoom}&size=${size}&maptype=satellite&key=${GOOGLE_MAPS_API_KEY}`;
 
-    onLocationSelect({ address, lat, lng, imageUrl });
+    onLocationSelect({ address, lat, lng, elevation, imageUrl });
   };
 
   return (

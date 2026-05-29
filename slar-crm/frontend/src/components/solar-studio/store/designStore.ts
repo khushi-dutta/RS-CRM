@@ -8,8 +8,10 @@ import type {
   DesignInverter, DesignDimension, DesignTextBlock, DesignData,
   DesignModule, DesignString, LayerVisibility, SolarAccessResult,
   ModuleSpec, InverterSpec, Point2D, ClipboardItem,
+  BOMItem, MountingConfig,
 } from './types';
 import { uid } from '../utils/geometry';
+import { generateStructure, resolveMountingConfig } from '../engine/MountingStructureEngine';
 
 // ─── Module & Inverter Databases ─────────────────────────────────────────────
 
@@ -48,6 +50,7 @@ interface DesignStoreState {
   dimensions: DesignDimension[];
   textBlocks: DesignTextBlock[];
   solarAccess: SolarAccessResult;
+  bomResults: Record<string, BOMItem[]>;
 
   // UI state
   activeTool: ToolType;
@@ -80,9 +83,10 @@ interface DesignStoreState {
   // Solar access
   solarAccessRun: boolean;
   showIrradianceMap: boolean;
-  
+
   // Location data
-  locationData: { address: string; lat: number; lng: number; imageUrl: string } | null;
+  locationData: { address: string; lat: number; lng: number; elevation: number; imageUrl: string } | null;
+  projectOrigin: { lat: number; lng: number; alt: number } | null;
 
   // Sun path simulation
   sunSimulation: {
@@ -162,6 +166,8 @@ interface DesignStoreState {
   addSubArray: (sa: DesignSubArray) => void;
   updateSubArray: (id: string, updates: Partial<DesignSubArray>) => void;
   deleteSubArray: (id: string) => void;
+  setSubArrayMounting: (id: string, config: Partial<MountingConfig>) => void;
+  updateBOM: (subArrayId: string) => void;
 
   // Modules
   addModuleToSubArray: (subArrayId: string, mod: DesignModule) => void;
@@ -190,9 +196,10 @@ interface DesignStoreState {
   setSolarAccess: (result: SolarAccessResult) => void;
   setSolarAccessRun: (v: boolean) => void;
   setShowIrradianceMap: (v: boolean) => void;
-  
+
   // Location
-  setLocationData: (data: { address: string; lat: number; lng: number; imageUrl: string } | null) => void;
+  setLocationData: (data: { address: string; lat: number; lng: number; elevation: number; imageUrl: string } | null) => void;
+  setProjectOrigin: (origin: { lat: number; lng: number; alt: number } | null) => void;
 
   // Sun simulation
   setSunSimulation: (updates: Partial<DesignStoreState['sunSimulation']>) => void;
@@ -255,6 +262,7 @@ export const useDesignStore = create<DesignStoreState>((set, get) => ({
   dimensions: [],
   textBlocks: [],
   solarAccess: {},
+  bomResults: {},
 
   // UI state
   activeTool: 'select',
@@ -293,9 +301,10 @@ export const useDesignStore = create<DesignStoreState>((set, get) => ({
   // Solar access
   solarAccessRun: false,
   showIrradianceMap: false,
-  
+
   // Location data
   locationData: null,
+  projectOrigin: null,
 
   // Sun path simulation
   sunSimulation: {
@@ -414,6 +423,7 @@ export const useDesignStore = create<DesignStoreState>((set, get) => ({
   addSubArray: (sa) => {
     get().pushHistory();
     set(s => ({ subArrays: [...s.subArrays, sa], isDirty: true }));
+    get().updateBOM(sa.id);
   },
   updateSubArray: (id, updates) => {
     get().pushHistory();
@@ -421,12 +431,37 @@ export const useDesignStore = create<DesignStoreState>((set, get) => ({
       subArrays: s.subArrays.map(sa => sa.id === id ? { ...sa, ...updates } : sa),
       isDirty: true,
     }));
+    get().updateBOM(id);
   },
   deleteSubArray: (id) => {
     get().pushHistory();
     set(s => ({
       subArrays: s.subArrays.filter(sa => sa.id !== id),
+      bomResults: Object.fromEntries(Object.entries(s.bomResults).filter(([subArrayId]) => subArrayId !== id)),
       isDirty: true,
+    }));
+  },
+  setSubArrayMounting: (id, config) => {
+    get().pushHistory();
+    set(s => ({
+      subArrays: s.subArrays.map(sa => sa.id === id
+        ? { ...sa, mountingConfig: { ...resolveMountingConfig(sa), ...config } }
+        : sa),
+      isDirty: true,
+    }));
+    get().updateBOM(id);
+  },
+  updateBOM: (subArrayId) => {
+    const s = get();
+    const subArray = s.subArrays.find(sa => sa.id === subArrayId);
+    if (!subArray) return;
+    const moduleSpec = MODULE_DATABASE.find(m => m.id === subArray.moduleSpecId);
+    if (!moduleSpec) return;
+    const roof = s.roofs.find(r => r.id === subArray.roofId);
+    const baseElevationM = roof ? (roof.baseHeight || 0) + (roof.height || 3) + 0.2 : 0;
+    const assembly = generateStructure({ subArray, moduleSpec, pxPerMeter: s.pxPerMeter, baseElevationM });
+    set(prev => ({
+      bomResults: { ...prev.bomResults, [subArrayId]: assembly.bom },
     }));
   },
 
@@ -442,6 +477,7 @@ export const useDesignStore = create<DesignStoreState>((set, get) => ({
       ),
       isDirty: true,
     }));
+    get().updateBOM(subArrayId);
   },
   deleteModule: (subArrayId, moduleId) => {
     get().pushHistory();
@@ -453,6 +489,7 @@ export const useDesignStore = create<DesignStoreState>((set, get) => ({
       ),
       isDirty: true,
     }));
+    get().updateBOM(subArrayId);
   },
   deleteModules: (moduleIds) => {
     get().pushHistory();
@@ -543,11 +580,18 @@ export const useDesignStore = create<DesignStoreState>((set, get) => ({
 
   setSolarAccess: (result) => set({ solarAccess: result }),
   setSolarAccessRun: (v) => set({ solarAccessRun: v }),
-  setShowIrradianceMap: (v) => set({ showIrradianceMap: v }),
-  
+  setShowIrradianceMap: (v) => set(s => ({
+    showIrradianceMap: v,
+    irradianceMap: { ...s.irradianceMap, enabled: v },
+  })),
+
   // ─── Location ────────────────────────────────────────────────────────────
-  
-  setLocationData: (data) => set({ locationData: data }),
+
+  setLocationData: (data) => set({
+    locationData: data,
+    projectOrigin: data ? { lat: data.lat, lng: data.lng, alt: data.elevation } : null
+  }),
+  setProjectOrigin: (origin) => set({ projectOrigin: origin }),
 
   // ─── Sun simulation ──────────────────────────────────────────────────────
 
@@ -575,11 +619,16 @@ export const useDesignStore = create<DesignStoreState>((set, get) => ({
 
   // ─── Irradiance map ──────────────────────────────────────────────────────
 
-  setIrradianceMap: (updates) => set(s => ({
-    irradianceMap: { ...s.irradianceMap, ...updates },
-  })),
+  setIrradianceMap: (updates) => set(s => {
+    const irradianceMap = { ...s.irradianceMap, ...updates };
+    return {
+      irradianceMap,
+      showIrradianceMap: updates.enabled ?? s.showIrradianceMap,
+    };
+  }),
 
   toggleIrradianceMap: () => set(s => ({
+    showIrradianceMap: !s.irradianceMap.enabled,
     irradianceMap: { ...s.irradianceMap, enabled: !s.irradianceMap.enabled },
   })),
 

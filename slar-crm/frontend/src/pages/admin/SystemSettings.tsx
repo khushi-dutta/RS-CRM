@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Card, Form, Input, Button, Switch, Divider, Tabs, Table, Upload, message, Typography, Row, Col } from 'antd';
+import { Card, Form, Input, Button, Switch, Divider, Tabs, Table, Upload, message, Typography, Row, Col, InputNumber } from 'antd';
 import { Settings, Bell, Map as MapIcon, UploadCloud, IndianRupee, Save, Building2 } from 'lucide-react';
 import MapboxGeofence from '../../components/MapboxGeofence';
+import backendApi from '../../lib/axios';
 
 const { TabPane } = Tabs;
 const { Title, Text } = Typography;
@@ -16,8 +17,26 @@ const SystemSettings: React.FC = () => {
   const [form] = Form.useForm();
   const [savedZones, setSavedZones] = useState<any[]>([]);
   
-  const saveConfig = () => {
-    message.success("Global configurations successfully applied and cached to Redis.");
+  React.useEffect(() => {
+    backendApi.get('/system-settings/PETROL_RATE_PER_KM')
+      .then(res => {
+        if (res.data.data) {
+          form.setFieldsValue({ petrolRate: parseFloat(res.data.data.value) });
+        }
+      })
+      .catch(() => {});
+  }, [form]);
+
+  const saveConfig = async () => {
+    try {
+      const vals = await form.validateFields();
+      if (vals.petrolRate !== undefined) {
+        await backendApi.post('/system-settings/PETROL_RATE_PER_KM', { value: vals.petrolRate.toString() });
+      }
+      message.success("Global configurations successfully applied and cached to Redis.");
+    } catch (err) {
+      message.error("Failed to save settings.");
+    }
   };
 
   const handleZonesSave = (zones: any[]) => {
@@ -56,7 +75,7 @@ const SystemSettings: React.FC = () => {
         <Tabs defaultActiveKey="General" size="large">
           
           <TabPane tab={<span className="font-medium flex items-center"><Building2 size={16} className="mr-2"/> Platform Identity</span>} key="General">
-             <Form layout="vertical" className="mt-4 max-w-3xl">
+             <Form form={form} layout="vertical" className="mt-4 max-w-3xl">
                <div className="flex gap-6 items-end mb-6">
                  <div>
                    <Text className="block mb-2 font-medium">Corporate Logo Interface</Text>
@@ -72,7 +91,8 @@ const SystemSettings: React.FC = () => {
                <Row gutter={24}>
                  <Col span={12}><Form.Item label="Registered Legal Name"><Input defaultValue="Lohia Solar Private Limited" /></Form.Item></Col>
                  <Col span={12}><Form.Item label="GST Identity Number (GSTIN)"><Input defaultValue="07AAAAA0000A1Z5" /></Form.Item></Col>
-                 <Col span={24}><Form.Item label="Corporate Registered Address"><Input.TextArea defaultValue="Industrial Plot 44, New Delhi, India" rows={3} /></Form.Item></Col>
+                 <Col span={12}><Form.Item label="Corporate Registered Address"><Input.TextArea defaultValue="Industrial Plot 44, New Delhi, India" rows={3} /></Form.Item></Col>
+                 <Col span={12}><Form.Item label="Petrol Rate per km (₹)" name="petrolRate" initialValue={5}><InputNumber prefix="₹" style={{ width: '100%' }} /></Form.Item></Col>
                </Row>
              </Form>
           </TabPane>

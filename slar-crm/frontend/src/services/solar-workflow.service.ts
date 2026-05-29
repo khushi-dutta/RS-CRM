@@ -190,7 +190,7 @@ export interface ModuleSolarData {
  */
 export function calculateModuleSolarAccess(
   modules: Array<{ id: string; lat: number; lng: number; widthM: number; lengthM: number; efficiency: number }>,
-  annualFluxData: ParsedGeoTiff,
+  annualFluxData: ParsedGeoTiff | null,
   maxSunshineHoursPerYear: number
 ): ModuleSolarData[] {
   const results: ModuleSolarData[] = [];
@@ -198,23 +198,33 @@ export function calculateModuleSolarAccess(
   for (const module of modules) {
     const areaM2 = module.widthM * module.lengthM;
     
-    // Sample the annual flux at module location
-    const annualFluxKwhM2 = GeoTiffUtils.sampleRegion(
-      annualFluxData.bands[0],
-      annualFluxData.width,
-      annualFluxData.height,
-      annualFluxData.bbox,
-      module.lat,
-      module.lng,
-      module.widthM,
-      module.lengthM
-    );
+    let annualFluxKwhM2 = 0;
+    let solarAccessPct = 100;
+    
+    if (annualFluxData) {
+      // Sample the annual flux at module location
+      annualFluxKwhM2 = GeoTiffUtils.sampleRegion(
+        annualFluxData.bands[0],
+        annualFluxData.width,
+        annualFluxData.height,
+        annualFluxData.bbox,
+        module.lat,
+        module.lng,
+        module.widthM,
+        module.lengthM
+      );
 
-    // Calculate solar access percentage
-    const solarAccessPct = GeoTiffUtils.calculateSolarAccess(
-      annualFluxKwhM2,
-      maxSunshineHoursPerYear
-    );
+      // Calculate solar access percentage
+      solarAccessPct = GeoTiffUtils.calculateSolarAccess(
+        annualFluxKwhM2,
+        maxSunshineHoursPerYear
+      );
+    } else {
+      // Fallback manual estimate when Google Solar data is unavailable
+      const effectiveSunshine = maxSunshineHoursPerYear || 1500;
+      annualFluxKwhM2 = effectiveSunshine;
+      solarAccessPct = 100; // Assume optimal placement in manual mode
+    }
 
     // Get color code
     const color = GeoTiffUtils.getSolarAccessColor(solarAccessPct);
@@ -262,16 +272,19 @@ export function calculateSystemSummary(
   maxSunshineHoursPerYear: number,
   inverterEfficiency = 0.96
 ): SystemSummary {
+  const effectiveSunshineHours = maxSunshineHoursPerYear || 1500;
+  const effectiveCarbonOffset = carbonOffsetFactorKgPerMwh || 400; // default 400 kg/MWh
+  
   const totalModules = moduleSolarData.length;
   const systemKwp = (totalModules * moduleWattage) / 1000;
   const annualDcKwh = moduleSolarData.reduce((sum, m) => sum + m.annualYieldKwh, 0);
   const annualAcKwh = GeoTiffUtils.calculateSystemAcOutput(annualDcKwh, inverterEfficiency);
   const specificYield = GeoTiffUtils.calculateSpecificYield(annualAcKwh, systemKwp);
-  const co2OffsetKg = GeoTiffUtils.calculateCo2Offset(annualAcKwh, carbonOffsetFactorKgPerMwh);
+  const co2OffsetKg = GeoTiffUtils.calculateCo2Offset(annualAcKwh, effectiveCarbonOffset);
   const performanceRatio = GeoTiffUtils.calculatePerformanceRatio(
     annualAcKwh,
     systemKwp,
-    maxSunshineHoursPerYear
+    effectiveSunshineHours
   );
 
   return {
@@ -298,20 +311,34 @@ export async function runCompleteWorkflow(
     onProgress?.('Resolving address...', 10);
     const location = await resolveAddress(placeId);
 
-    // Step 4: Fetch building insights
-    onProgress?.('Fetching building insights...', 30);
-    const buildingInsights = await fetchBuildingInsights(location.lat, location.lng);
+    let buildingInsights = null;
+    let dataLayers = null;
+    let geoTiffs: { dsm: ParsedGeoTiff | null; rgb: ParsedGeoTiff | null; annualFlux: ParsedGeoTiff | null; monthlyFlux: ParsedGeoTiff[] | null } = { dsm: null, rgb: null, annualFlux: null, monthlyFlux: null };
 
-    // Step 5: Fetch data layers
-    onProgress?.('Fetching solar data layers...', 50);
-    const dataLayers = await fetchDataLayers(location.lat, location.lng);
+    try {
+      // Step 4: Fetch building insights
+      onProgress?.('Fetching building insights...', 30);
+      buildingInsights = await fetchBuildingInsights(location.lat, location.lng);
 
-    // Download GeoTIFFs
-    onProgress?.('Downloading GeoTIFF files...', 60);
-    const geoTiffs = await downloadAndParseGeoTiffs(dataLayers, (step, current, total) => {
-      const progress = 60 + (current / total) * 20;
-      onProgress?.(step, progress);
-    });
+      // Step 5: Fetch data layers
+      onProgress?.('Fetching solar data layers...', 50);
+      dataLayers = await fetchDataLayers(location.lat, location.lng);
+
+      // Download GeoTIFFs
+      onProgress?.('Downloading GeoTIFF files...', 60);
+      const downloadedGeoTiffs = await downloadAndParseGeoTiffs(dataLayers, (step, current, total) => {
+        const progress = 60 + (current / total) * 20;
+        onProgress?.(step, progress);
+      });
+      geoTiffs = {
+        dsm: downloadedGeoTiffs.dsm,
+        rgb: downloadedGeoTiffs.rgb,
+        annualFlux: downloadedGeoTiffs.annualFlux,
+        monthlyFlux: downloadedGeoTiffs.monthlyFlux,
+      };
+    } catch (apiError: any) {
+      console.warn('Google Solar API data not available, falling back to manual mode.', apiError);
+    }
 
     // Step 6: Fetch elevation & timezone
     onProgress?.('Fetching elevation and timezone...', 85);
@@ -332,7 +359,7 @@ export async function runCompleteWorkflow(
       elevation,
       timezone,
       status: 'ready',
-      error: null,
+      error: !buildingInsights ? 'Solar data not available for this location. Manual mode enabled.' : null,
     };
   } catch (error: any) {
     console.error('Solar workflow error:', error);

@@ -6,6 +6,9 @@ import { authenticate } from '../middlewares/auth';
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+// Webhook (no auth required)
+router.post('/webhook/:callId', aiVoiceCampaignController.handleWebhook);
+
 // All routes require authentication
 router.use(authenticate);
 
@@ -27,7 +30,6 @@ router.get('/:id/calls', aiVoiceCampaignController.getCalls);
 router.get('/calls/:callId', aiVoiceCampaignController.getCall);
 router.post('/calls/:callId/convert', aiVoiceCampaignController.convertToLead);
 
-// Webhook (no auth required)
-router.post('/webhook/:callId', aiVoiceCampaignController.handleWebhook);
+
 
 export default router;

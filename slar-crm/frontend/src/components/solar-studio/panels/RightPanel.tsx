@@ -4,11 +4,24 @@
 
 import { useState, useMemo } from 'react';
 import { useDesignStore, MODULE_DATABASE, INVERTER_DATABASE } from '../store/designStore';
-import type { DesignRoof, DesignObstruction, DesignSubArray, DesignInverter, TreeModelType } from '../store/types';
+import type {
+  BOMItem,
+  DesignRoof,
+  DesignObstruction,
+  DesignSubArray,
+  DesignInverter,
+  FoundationType,
+  MountingConfig,
+  MountingStructureType,
+  StructuralMaterial,
+  TreeModelType,
+} from '../store/types';
+import { DEFAULT_MOUNTING_CONFIGS } from '../store/types';
 import { uid, polygonArea, shadowFreeRowSpacing } from '../utils/geometry';
 import { runPlacement, autoRowSpacingPx } from '../engine/PlacementEngine';
 import { calculateEnergyYield } from '../engine/EnergyYield';
 import { calculateWireSize } from '../engine/WireSizeCalc';
+import { generateStructure, resolveMountingConfig } from '../engine/MountingStructureEngine';
 import SunPathPanel from './SunPathPanel';
 import EnergyCalculationPanel from './EnergyCalculationPanel';
 
@@ -214,6 +227,11 @@ function RoofPanel({ roof }: { roof: DesignRoof }) {
     });
 
     if (result.modules.length > 0) {
+      // Clear existing sub-arrays on this roof
+      store.subArrays
+        .filter(sa => sa.roofId === roof.id)
+        .forEach(sa => store.deleteSubArray(sa.id));
+
       const saId = uid();
       const mods = result.modules.map(m => ({ ...m, subArrayId: saId }));
       store.addSubArray({
@@ -563,6 +581,8 @@ function SubArrayPanel({ subArray }: { subArray: DesignSubArray }) {
         </div>
       </div>
 
+      <MountingStructurePanel subArray={subArray} />
+
       <div className="panel-section">
         <button className="panel-btn panel-btn-primary" onClick={() => handleUpdate({})}>Update</button>
         {store.solarAccessRun && (
@@ -575,6 +595,191 @@ function SubArrayPanel({ subArray }: { subArray: DesignSubArray }) {
       </div>
     </div>
   );
+}
+
+function MountingStructurePanel({ subArray }: { subArray: DesignSubArray }) {
+  const store = useDesignStore();
+  const spec = MODULE_DATABASE.find(m => m.id === subArray.moduleSpecId);
+  const config = resolveMountingConfig(subArray);
+  const fallbackBOM = useMemo(() => {
+    const roof = store.roofs.find(r => r.id === subArray.roofId);
+    if (!spec) return [];
+    const baseElevationM = roof ? (roof.baseHeight || 0) + (roof.height || 3) + 0.2 : 0;
+    return generateStructure({ subArray, moduleSpec: spec, pxPerMeter: store.pxPerMeter, baseElevationM }).bom;
+  }, [spec, store.roofs, store.pxPerMeter, subArray]);
+  const bom = store.bomResults[subArray.id] || fallbackBOM;
+
+  const updateConfig = (updates: Partial<MountingConfig>) => {
+    store.setSubArrayMounting(subArray.id, updates);
+  };
+
+  const updateStructureType = (structureType: MountingStructureType) => {
+    const defaults = DEFAULT_MOUNTING_CONFIGS[structureType];
+    updateConfig({
+      ...config,
+      ...defaults,
+      structureType,
+      tilt: subArray.tilt,
+      azimuth: subArray.azimuth,
+    });
+  };
+
+  const groupedBOM = groupBOM(bom);
+
+  return (
+    <>
+      <div className="panel-section">
+        <div className="panel-section-title">Mounting Structure</div>
+        <div className="panel-field">
+          <span className="panel-label">Type</span>
+          <select className="panel-select" value={config.structureType}
+            onChange={e => updateStructureType(e.target.value as MountingStructureType)}>
+            {MOUNTING_TYPES.map(type => (
+              <option key={type.value} value={type.value}>{type.icon} {type.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="panel-section-title" style={{ marginTop: 12 }}>Geometry</div>
+        <NumberField label="Tilt (deg)" value={config.tilt} min={0} max={90} step={1}
+          onChange={tilt => updateConfig({ tilt })} />
+        <NumberField label="Azimuth" value={config.azimuth} min={0} max={360} step={1}
+          onChange={azimuth => updateConfig({ azimuth })} />
+        <NumberField label="Ground clear. (m)" value={config.groundClearanceM} min={0} step={0.05}
+          onChange={groundClearanceM => updateConfig({ groundClearanceM })} />
+        <NumberField label="Leg spacing (m)" value={config.legSpacingM} min={0.5} step={0.1}
+          onChange={legSpacingM => updateConfig({ legSpacingM })} />
+        {config.structureType === 'east_west' && (
+          <NumberField label="E-W tilt (deg)" value={config.ewTiltDeg ?? 10} min={0} max={30} step={1}
+            onChange={ewTiltDeg => updateConfig({ ewTiltDeg })} />
+        )}
+        {config.structureType === 'sat_single_axis' && (
+          <NumberField label="Drive aisle (m)" value={config.driveAisleWidthM ?? 1} min={0} step={0.1}
+            onChange={driveAisleWidthM => updateConfig({ driveAisleWidthM })} />
+        )}
+
+        <div className="panel-section-title" style={{ marginTop: 12 }}>Foundation</div>
+        <div className="panel-field-row">
+          <span className="panel-label">Type</span>
+          <select className="panel-select" style={{ width: 135 }} value={config.foundationType}
+            onChange={e => updateConfig({ foundationType: e.target.value as FoundationType })}>
+            {FOUNDATION_TYPES.map(type => <option key={type} value={type}>{labelize(type)}</option>)}
+          </select>
+        </div>
+        <NumberField label="Depth (m)" value={config.foundationDepthM} min={0} step={0.1}
+          onChange={foundationDepthM => updateConfig({ foundationDepthM })} />
+
+        <div className="panel-section-title" style={{ marginTop: 12 }}>Material</div>
+        <div className="panel-field-row">
+          <span className="panel-label">Primary</span>
+          <select className="panel-select" style={{ width: 135 }} value={config.material}
+            onChange={e => updateConfig({ material: e.target.value as StructuralMaterial })}>
+            {MATERIAL_TYPES.map(type => <option key={type} value={type}>{labelize(type)}</option>)}
+          </select>
+        </div>
+        <NumberField label="Column (mm)" value={config.columnSectionMm} min={25} step={5}
+          onChange={columnSectionMm => updateConfig({ columnSectionMm })} />
+        <div className="panel-field-row">
+          <span className="panel-label">Rail W x H</span>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <input type="number" className="panel-input-sm" style={{ width: 52 }} value={config.railSectionW}
+              onChange={e => updateConfig({ railSectionW: Number(e.target.value) })} />
+            <input type="number" className="panel-input-sm" style={{ width: 52 }} value={config.railSectionH}
+              onChange={e => updateConfig({ railSectionH: Number(e.target.value) })} />
+          </div>
+        </div>
+        <div className="layer-checkbox">
+          <input id={`bracing-${subArray.id}`} type="checkbox" checked={config.bracingEnabled}
+            onChange={e => updateConfig({ bracingEnabled: e.target.checked })} />
+          <label htmlFor={`bracing-${subArray.id}`}>Bracing enabled</label>
+        </div>
+      </div>
+
+      <div className="panel-section">
+        <div className="panel-section-title">Live BOM</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {Object.entries(groupedBOM).map(([category, items]) => (
+            <div key={category}>
+              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>
+                {category}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 54px 38px', gap: 6, fontSize: 11, color: '#cbd5e1' }}>
+                {items.map((item, index) => (
+                  <div key={`${item.description}-${index}`} style={{ display: 'contents' }}>
+                    <span title={item.notes}>{item.description}</span>
+                    <span style={{ textAlign: 'right', fontWeight: 600 }}>{item.quantity.toFixed(item.unit === 'pcs' ? 0 : 1)}</span>
+                    <span style={{ color: '#64748b' }}>{item.unit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <button className="panel-btn" style={{ marginTop: 12 }} onClick={() => exportBOMCsv(subArray.id, bom)}>
+          Export CSV
+        </button>
+      </div>
+    </>
+  );
+}
+
+function NumberField({ label, value, onChange, min, max, step }: { label: string; value: number; onChange: (value: number) => void; min?: number; max?: number; step?: number }) {
+  return (
+    <div className="panel-field-row">
+      <span className="panel-label">{label}</span>
+      <input type="number" className="panel-input-sm" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(Number(e.target.value))} />
+    </div>
+  );
+}
+
+const MOUNTING_TYPES: { value: MountingStructureType; icon: string; label: string }[] = [
+  { value: 'flush_roof', icon: 'FR', label: 'Flush rooftop' },
+  { value: 'elevated_roof', icon: 'ER', label: 'Elevated rooftop' },
+  { value: 'fixed_tilt_single', icon: 'S1', label: 'Fixed tilt single' },
+  { value: 'fixed_tilt_double', icon: 'S2', label: 'Fixed tilt double' },
+  { value: 'east_west', icon: 'EW', label: 'East-west' },
+  { value: 'ballasted_roof', icon: 'BL', label: 'Ballasted' },
+  { value: 'sat_single_axis', icon: 'SAT', label: 'Single-axis tracker' },
+];
+
+const FOUNDATION_TYPES: FoundationType[] = ['rcc_footing', 'pile', 'screw_pile', 'ballast', 'rock_anchor', 'l_foot', 'roof_hook'];
+const MATERIAL_TYPES: StructuralMaterial[] = ['steel_galv', 'aluminum', 'stainless', 'concrete'];
+
+function groupBOM(bom: BOMItem[]): Record<string, BOMItem[]> {
+  return bom.reduce<Record<string, BOMItem[]>>((groups, item) => {
+    groups[item.category] = [...(groups[item.category] || []), item];
+    return groups;
+  }, {});
+}
+
+function labelize(value: string): string {
+  return value.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function exportBOMCsv(subArrayId: string, bom: BOMItem[]) {
+  const header = ['Category', 'Description', 'Unit', 'Quantity', 'Unit Weight Kg', 'Total Weight Kg', 'Notes'];
+  const rows = bom.map(item => [
+    item.category,
+    item.description,
+    item.unit,
+    String(item.quantity),
+    item.unitWeightKg?.toString() || '',
+    item.totalWeightKg?.toString() || '',
+    item.notes || '',
+  ]);
+  const csv = [header, ...rows].map(row => row.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `bom-${subArrayId}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 // ─── Inverter Panel ──────────────────────────────────────────────────────────

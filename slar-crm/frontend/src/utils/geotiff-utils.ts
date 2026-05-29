@@ -69,10 +69,11 @@ export function sampleRegion(
   regionHeightM: number
 ): number {
   // Calculate meters per pixel
-  const mpp = (bbox[2] - bbox[0]) * 111320 / width;
+  const mppX = ((bbox[2] - bbox[0]) * 111320 * Math.cos(lat * Math.PI / 180)) / width;
+  const mppY = ((bbox[3] - bbox[1]) * 111320) / height;
   
-  const halfW = Math.floor(regionWidthM / mpp / 2);
-  const halfH = Math.floor(regionHeightM / mpp / 2);
+  const halfW = Math.floor(regionWidthM / mppX / 2);
+  const halfH = Math.floor(regionHeightM / mppY / 2);
   
   const cx = Math.round((lng - bbox[0]) / (bbox[2] - bbox[0]) * (width - 1));
   const cy = Math.round((1 - (lat - bbox[1]) / (bbox[3] - bbox[1])) * (height - 1));
@@ -185,8 +186,11 @@ export function roofBoundingBoxToPolygon(
   const vertices: number[] = [];
   
   for (const corner of corners) {
-    const px = ((corner.lng - mapOriginLng) / mpp) * canvasScale;
-    const py = ((corner.lat - mapOriginLat) / mpp) * canvasScale * -1; // y inverted
+    const metersX = (corner.lng - mapOriginLng) * 111320 * Math.cos(mapOriginLat * Math.PI / 180);
+    const metersY = (corner.lat - mapOriginLat) * 111320;
+    
+    const px = (metersX / mpp) * canvasScale;
+    const py = (metersY / mpp) * canvasScale * -1; // y inverted
     vertices.push(px, py);
   }
   

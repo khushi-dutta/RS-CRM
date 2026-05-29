@@ -28,6 +28,12 @@ export default function StudioPage() {
   useEffect(() => {
     if (designId) {
       store.loadDesign(designId);
+    } else {
+      store.setLocationData(null);
+    }
+    
+    if (!useDesignStore.getState().locationData) {
+      setShowLocationSelector(true);
     }
   }, [designId]);
 
@@ -41,7 +47,7 @@ export default function StudioPage() {
   }, [store.isDirty, store.roofs, store.obstructions, store.subArrays,
       store.inverters, store.dimensions, store.textBlocks]);
 
-  const handleLocationSelect = (data: { address: string; lat: number; lng: number; imageUrl: string }) => {
+  const handleLocationSelect = (data: { address: string; lat: number; lng: number; elevation: number; imageUrl: string }) => {
     console.log('Location selected:', data);
     // Store the location data
     store.setLocationData(data);

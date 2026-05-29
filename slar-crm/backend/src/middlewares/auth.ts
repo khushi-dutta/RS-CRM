@@ -64,3 +64,7 @@ export const dealerScope = (req: AuthenticatedRequest, res: Response, next: Next
   }
   next();
 };
+
+// Backwards-compatible aliases for older code expecting these names
+export const protect = authenticate;
+export const restrictTo = (...roles: UserRole[]) => authorize(...roles);

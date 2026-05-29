@@ -34,7 +34,8 @@ import {
   ArrowBack as ArrowBackIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { api } from '../../lib/api';
+import VoiceTestInterface from '../../components/voice/VoiceTestInterface';
 
 interface Campaign {
   id: string;
@@ -85,6 +86,7 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [isTestOpen, setIsTestOpen] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -96,7 +98,7 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
 
   const fetchCampaign = async () => {
     try {
-      const response = await axios.get(`/api/ai-voice-campaigns/${id}`);
+      const response = await api.get(`/ai-voice-campaigns/${id}`);
       setCampaign(response.data);
     } catch (error) {
       console.error('Error fetching campaign:', error);
@@ -107,7 +109,7 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
 
   const fetchCalls = async () => {
     try {
-      const response = await axios.get(`/api/ai-voice-campaigns/${id}/calls`);
+      const response = await api.get(`/ai-voice-campaigns/${id}/calls`);
       setCalls(response.data);
     } catch (error) {
       console.error('Error fetching calls:', error);
@@ -116,7 +118,7 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
 
   const fetchStats = async () => {
     try {
-      const response = await axios.get(`/api/ai-voice-campaigns/${id}/stats`);
+      const response = await api.get(`/ai-voice-campaigns/${id}/stats`);
       setStats(response.data);
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -137,7 +139,7 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
     formData.append('file', selectedFile);
 
     try {
-      await axios.post(`/api/ai-voice-campaigns/${id}/upload`, formData, {
+      await api.post(`/ai-voice-campaigns/${id}/upload`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -156,7 +158,7 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
 
   const handleStartCampaign = async () => {
     try {
-      await axios.post(`/api/ai-voice-campaigns/${id}/start`);
+      await api.post(`/ai-voice-campaigns/${id}/start`);
       fetchCampaign();
       fetchStats();
     } catch (error) {
@@ -166,7 +168,7 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
 
   const handlePauseCampaign = async () => {
     try {
-      await axios.post(`/api/ai-voice-campaigns/${id}/pause`);
+      await api.post(`/ai-voice-campaigns/${id}/pause`);
       fetchCampaign();
     } catch (error) {
       console.error('Error pausing campaign:', error);
@@ -205,7 +207,7 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-        <IconButton onClick={() => navigate('/ai-voice-campaigns')}>
+        <IconButton onClick={() => navigate('..')}>
           <ArrowBackIcon />
         </IconButton>
         <Typography variant="h4">{campaign.name}</Typography>
@@ -300,6 +302,15 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
             Start Campaign
           </Button>
         )}
+
+        <Button
+          variant="outlined"
+          color="secondary"
+          startIcon={<PhoneIcon />}
+          onClick={() => setIsTestOpen(true)}
+        >
+          Start Test Conversation
+        </Button>
       </Box>
 
       {/* Tabs */}
@@ -412,6 +423,13 @@ const AIVoiceCampaignDetailPage: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <VoiceTestInterface
+        open={isTestOpen}
+        onClose={() => setIsTestOpen(false)}
+        campaignId={id!}
+        scriptTemplate={campaign.scriptTemplate}
+      />
     </Box>
   );
 };

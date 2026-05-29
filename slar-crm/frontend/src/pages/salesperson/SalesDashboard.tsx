@@ -1,5 +1,6 @@
-import { Col, Row, Statistic, Button, List, Tag, Typography, Avatar } from 'antd';
+import { Col, Row, Statistic, Button, List, Tag, Avatar, Typography } from 'antd';
 import { EnvironmentOutlined, PlusOutlined, UserOutlined, PhoneOutlined, ArrowRightOutlined } from '@ant-design/icons';
+import { Map, MapPin, Calendar, Trophy, Briefcase } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import backendApi from '../../lib/axios';
 import { useNavigate } from 'react-router-dom';
@@ -94,29 +95,46 @@ export default function SalesDashboard() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center mb-6">
-        <Title level={4} className="!mb-0">Overview</Title>
+        <h1 className="text-2xl font-bold mb-0 flex items-center"><Briefcase className="mr-2 text-indigo-600"/> Sales Console</h1>
       </div>
 
       <Row gutter={[16, 16]}>
         <Col xs={12} md={6}>
-          <DashboardCard loading={leadsLoading}>
-            <Statistic title="Distance Traveled Today" value={distanceTraveled} suffix="km" valueStyle={{ color: '#1890ff' }} />
+          <DashboardCard loading={leadsLoading} className="border-l-4 border-l-blue-500 bg-blue-50/10 dark:bg-blue-900/10">
+            <Statistic 
+              title={<span className="text-apple-textMuted font-medium flex items-center"><Map size={16} className="mr-2"/> Distance Traveled Today</span>} 
+              value={distanceTraveled} 
+              suffix="km" 
+              valueStyle={{ fontWeight: 'bold', color: '#3b82f6' }} 
+            />
           </DashboardCard>
         </Col>
         <Col xs={12} md={6}>
-          <DashboardCard loading={leadsLoading}>
-            <Statistic title="Closest Unvisited Lead" value={closestLead?.name || 'N/A'} formatter={(val) => <div className="text-xl overflow-hidden text-ellipsis whitespace-nowrap">{val}</div>} />
-            <div className="mt-1 text-xs text-gray-500">{closestLead?.distance || ''} away</div>
+          <DashboardCard loading={leadsLoading} className="border-l-4 border-l-amber-500 bg-amber-50/10 dark:bg-amber-900/10">
+            <Statistic 
+              title={<span className="text-apple-textMuted font-medium flex items-center"><MapPin size={16} className="mr-2"/> Closest Unvisited Lead</span>} 
+              value={closestLead?.name || 'N/A'} 
+              formatter={(val) => <div className="text-xl overflow-hidden text-ellipsis whitespace-nowrap font-bold text-slate-700 dark:text-slate-200">{val}</div>} 
+            />
+            <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 font-medium">{closestLead?.distance || ''} away</div>
           </DashboardCard>
         </Col>
         <Col xs={12} md={6}>
-          <DashboardCard loading={routeLoading}>
-            <Statistic title="Today's Visits" value={visits.length} valueStyle={{ color: '#1890ff' }} />
+          <DashboardCard loading={routeLoading} className="border-l-4 border-l-indigo-500 bg-indigo-50/10 dark:bg-indigo-900/10">
+            <Statistic 
+              title={<span className="text-apple-textMuted font-medium flex items-center"><Calendar size={16} className="mr-2"/> Today's Visits</span>} 
+              value={visits.length} 
+              valueStyle={{ fontWeight: 'bold', color: '#6366f1' }} 
+            />
           </DashboardCard>
         </Col>
         <Col xs={12} md={6}>
-          <DashboardCard loading={leadsLoading}>
-            <Statistic title="Won This Month" value={pipelineData[5].count} valueStyle={{ color: '#cf1322' }} />
+          <DashboardCard loading={leadsLoading} className="border-l-4 border-l-emerald-500 bg-emerald-50/10 dark:bg-emerald-900/10">
+            <Statistic 
+              title={<span className="text-apple-textMuted font-medium flex items-center"><Trophy size={16} className="mr-2"/> Won This Month</span>} 
+              value={pipelineData[5].count} 
+              valueStyle={{ fontWeight: 'bold', color: '#10b981' }} 
+            />
           </DashboardCard>
         </Col>
       </Row>

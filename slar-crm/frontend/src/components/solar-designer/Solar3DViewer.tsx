@@ -91,23 +91,59 @@ function HouseBody({ section, globalCenter }: { section: RoofSection; globalCent
   const pts = latlngToMeters(section.polygon, globalCenter);
   if (pts.length < 3) return null;
 
-  const shape = useMemo(() => {
-    const s = new THREE.Shape();
-    s.moveTo(pts[0].x, pts[0].y);
-    pts.slice(1).forEach(p => s.lineTo(p.x, p.y));
-    s.closePath();
-    return s;
-  }, [pts]);
+  // Calculate the tilted plane's normal to find exact z-height at any (x,y)
+  const tiltRad = (section.tiltDeg * Math.PI) / 180;
+  const aziRad = -(section.azimuthDeg * Math.PI) / 180;
+  const rotMatrix = new THREE.Matrix4();
+  rotMatrix.makeRotationZ(-aziRad);
+  rotMatrix.multiply(new THREE.Matrix4().makeRotationX(tiltRad));
+  rotMatrix.multiply(new THREE.Matrix4().makeRotationZ(aziRad));
 
-  const bodyGeo = useMemo(() => {
-    return new THREE.ExtrudeGeometry(shape, { depth: 5, bevelEnabled: false });
-  }, [shape]);
+  const normal = new THREE.Vector3(0, 0, 1).applyMatrix4(rotMatrix);
+  
+  // Plane equation: n.x*x + n.y*y + n.z*z = 0 (since it pivots around origin 0,0,0)
+  const getZ = (x: number, y: number) => {
+    return -(normal.x * x + normal.y * y) / normal.z;
+  };
 
-  // House body is NOT tilted. It acts as the vertical walls.
-  // We place it below the roof. (Z = 0 is roof base, so extrude down).
+  const vertices: number[] = [];
+  const indices: number[] = [];
+
+  for (let i = 0; i < pts.length; i++) {
+    const p1 = pts[i];
+    const p2 = pts[(i + 1) % pts.length];
+
+    const z1 = getZ(p1.x, p1.y);
+    const z2 = getZ(p2.x, p2.y);
+
+    const baseIdx = vertices.length / 3;
+
+    // Wall quadrilateral vertices
+    // V0: Top-Left (p1 at roof height)
+    vertices.push(p1.x, p1.y, z1);
+    // V1: Bottom-Left (p1 at ground)
+    vertices.push(p1.x, p1.y, -10);
+    // V2: Bottom-Right (p2 at ground)
+    vertices.push(p2.x, p2.y, -10);
+    // V3: Top-Right (p2 at roof height)
+    vertices.push(p2.x, p2.y, z2);
+
+    // Two triangles per wall
+    indices.push(baseIdx, baseIdx + 1, baseIdx + 2);
+    indices.push(baseIdx, baseIdx + 2, baseIdx + 3);
+  }
+
+  const geo = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    return geometry;
+  }, [pts, tiltRad, aziRad]);
+
   return (
-    <mesh geometry={bodyGeo} castShadow receiveShadow position={[0, 0, -5]}>
-      <meshStandardMaterial color="#f0f2f5" roughness={0.9} metalness={0.0} />
+    <mesh geometry={geo} castShadow receiveShadow>
+      <meshStandardMaterial color="#f0f2f5" roughness={0.9} metalness={0.0} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -429,7 +465,7 @@ export default function Solar3DViewer({
         <Environment preset="city" />
         <Sky sunPosition={[-1, 0, 1]} inclination={0.2} azimuth={0.25} rayleigh={1.5} turbidity={5} mieCoefficient={0.005} />
         <PerspectiveCamera makeDefault fov={45} position={cameraPos} />
-        <OrbitControls ref={controlsRef} enablePan enableZoom enableRotate maxPolarAngle={Math.PI / 2 - 0.05} minDistance={5} maxDistance={150} />
+        <OrbitControls ref={controlsRef} enablePan enableZoom enableRotate maxPolarAngle={Math.PI / 2 - 0.05} minDistance={20} maxDistance={150} />
         <ambientLight intensity={0.4} />
         <SunLight hour={hour} date={activeDate} />
         <Suspense fallback={null}>

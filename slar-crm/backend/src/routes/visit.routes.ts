@@ -19,7 +19,7 @@ router.get('/calendar', getCalendar);
 
 // Single Visit Operations
 router.get('/:id', getVisit);
-router.patch('/:id', authorize(UserRole.ADMIN, UserRole.CALLING_STAFF), rescheduleVisit);
+router.patch('/:id', authorize(UserRole.ADMIN, UserRole.CALLING_STAFF, UserRole.SALESPERSON), rescheduleVisit);
 router.delete('/:id', authorize(UserRole.ADMIN, UserRole.CALLING_STAFF), cancelVisit);
 
 // Forms, Completions & Media

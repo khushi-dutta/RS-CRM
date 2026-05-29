@@ -1,27 +1,50 @@
 import React, { useState } from 'react';
 import { Card, Table, Tag, Button, Input, Modal, Select, Form, Row, Col, message } from 'antd';
-import { Search, UserPlus, Key, EyeOff, Filter } from 'lucide-react';
+import { Search, UserPlus, Key, EyeOff, Filter, Edit } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import backendApi from '../../lib/axios';
 
 const { Option } = Select;
-
-const mockUsers = [
-  { id: 'USR-001', name: 'Rahul Sharma', email: 'rahul.s@lohia.com', role: 'SALESPERSON', zone: 'North Delhi', status: 'ACTIVE', lastLogin: 'Today' },
-  { id: 'USR-002', name: 'Neha Patel', email: 'neha.p@lohia.com', role: 'DOCUMENTATION', zone: 'All', status: 'ACTIVE', lastLogin: 'Yesterday' },
-  { id: 'USR-003', name: 'Vikram Singh', email: 'vikram.s@lohia.com', role: 'INSTALLATION', zone: 'South Delhi', status: 'ACTIVE', lastLogin: 'Today' },
-  { id: 'USR-004', name: 'Amit Desai', email: 'amit.d@dealer.com', role: 'DEALER_ADMIN', zone: 'Noida', status: 'ACTIVE', lastLogin: '3 days ago' },
-  { id: 'USR-005', name: 'Suresh Menon', email: 'suresh.m@lohia.com', role: 'SALESPERSON', zone: 'Gurgaon', status: 'INACTIVE', lastLogin: '1 month ago' },
-];
 
 const UserManagement: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [createModal, setCreateModal] = useState(false);
   const [deactivateModal, setDeactivateModal] = useState<any>(null);
   const [form] = Form.useForm();
+  const [editForm] = Form.useForm();
+  const [editingUser, setEditingUser] = useState<any>(null);
 
-  const handleCreate = () => {
-    message.success("User created. A temporary password was emailed securely.");
-    setCreateModal(false);
-    form.resetFields();
+  const { data: users, isLoading, refetch } = useQuery({
+    queryKey: ['admin-users'],
+    queryFn: async () => {
+      const res = await backendApi.get('/admin/users');
+      return res.data.data;
+    }
+  });
+
+  const handleCreate = async () => {
+    try {
+      const values = await form.validateFields();
+      await backendApi.post('/admin/users', values);
+      message.success("User created. A temporary password was emailed securely.");
+      setCreateModal(false);
+      form.resetFields();
+      refetch();
+    } catch (error: any) {
+      message.error(error.response?.data?.error || "Failed to create user");
+    }
+  };
+
+  const handleEdit = async () => {
+    try {
+      const values = await editForm.validateFields();
+      await backendApi.put(`/admin/users/${editingUser.id}`, values);
+      message.success("User updated");
+      setEditingUser(null);
+      refetch();
+    } catch (error: any) {
+      message.error(error.response?.data?.error || "Failed to update user");
+    }
   };
 
   const handleDeactivate = () => {
@@ -52,9 +75,15 @@ const UserManagement: React.FC = () => {
     { title: 'Operational Zone', dataIndex: 'zone', key: 'zone' },
     { 
       title: 'Status', 
-      dataIndex: 'status', 
+      dataIndex: 'isActive', 
       key: 'status',
-      render: (t: string) => <Badge color={t === 'ACTIVE' ? 'green' : 'red'} text={t} /> 
+      render: (isActive: boolean) => <Badge color={isActive ? 'green' : 'red'} text={isActive ? 'ACTIVE' : 'INACTIVE'} /> 
+    },
+    {
+      title: 'Monthly Salary',
+      dataIndex: 'monthlySalary',
+      key: 'monthlySalary',
+      render: (val: number) => `₹${val?.toLocaleString() || 0}`
     },
     { title: 'Last Login', dataIndex: 'lastLogin', key: 'lastLogin' },
     {
@@ -62,9 +91,12 @@ const UserManagement: React.FC = () => {
       key: 'actions',
       render: (_: unknown, r: any) => (
         <div className="flex gap-2">
-          <Button size="small" type="text" className="text-blue-600">Edit</Button>
+          <Button size="small" type="text" className="text-blue-600" onClick={() => {
+            setEditingUser(r);
+            editForm.setFieldsValue(r);
+          }}><Edit size={14} /></Button>
           <Button size="small" type="text" onClick={() => resetPassword(r)} icon={<Key size={14}/>}></Button>
-          {r.status === 'ACTIVE' && (
+          {r.isActive && (
              <Button size="small" type="text" danger onClick={() => setDeactivateModal(r)} icon={<EyeOff size={14}/>}></Button>
           )}
         </div>
@@ -111,8 +143,9 @@ const UserManagement: React.FC = () => {
 
          <Table 
             columns={columns} 
-            dataSource={mockUsers} 
+            dataSource={users || []} 
             rowKey="id"
+            loading={isLoading}
             pagination={{ pageSize: 15 }}
          />
       </Card>
@@ -148,10 +181,56 @@ const UserManagement: React.FC = () => {
                  </Form.Item>
               </Col>
            </Row>
+            <Row gutter={16}>
+               <Col span={12}>
+                  <Form.Item label="Operational Zone Target" name="zoneId">
+                     <Select placeholder="Assign geographic bounds..."><Option value="N_DEL">North Delhi</Option></Select>
+                  </Form.Item>
+               </Col>
+               <Col span={12}>
+                  <Form.Item label="Monthly Salary (₹)" name="monthlySalary">
+                     <Input type="number" placeholder="0" />
+                  </Form.Item>
+               </Col>
+            </Row>
+        </Form>
+      </Modal>
+
+      {/* EDIT MODAL */}
+      <Modal
+        title="Edit Employee Profile"
+        open={!!editingUser}
+        onOk={handleEdit}
+        onCancel={() => setEditingUser(null)}
+        width={700}
+        okText="Save Changes"
+        okButtonProps={{ className: 'bg-indigo-600 border-none' }}
+      >
+        <Form form={editForm} layout="vertical" className="mt-4">
+           <Row gutter={16}>
+              <Col span={12}><Form.Item label="Full Name" name="name"><Input /></Form.Item></Col>
+              <Col span={12}><Form.Item label="Corporate Email" name="email"><Input type="email" /></Form.Item></Col>
+           </Row>
+           <Row gutter={16}>
+              <Col span={12}><Form.Item label="Phone Number" name="phone"><Input /></Form.Item></Col>
+              <Col span={12}>
+                 <Form.Item label="Global Authorization Role" name="role">
+                    <Select>
+                       <Option value="SALESPERSON">Sales Associate</Option>
+                       <Option value="DOCUMENTATION">Documentation Officer</Option>
+                       <Option value="INSTALLATION">Installation Engineer</Option>
+                       <Option value="WAREHOUSE">Warehouse Admin</Option>
+                       <Option value="ACCOUNTANT">Financial Accountant</Option>
+                       <Option value="PROJECT_HEAD">Project Head</Option>
+                       <Option value="ADMIN">Super Administrator</Option>
+                    </Select>
+                 </Form.Item>
+              </Col>
+           </Row>
            <Row gutter={16}>
               <Col span={12}>
-                 <Form.Item label="Operational Zone Target">
-                    <Select placeholder="Assign geographic bounds..."><Option value="N_DEL">North Delhi</Option></Select>
+                 <Form.Item label="Monthly Salary (₹)" name="monthlySalary">
+                    <Input type="number" />
                  </Form.Item>
               </Col>
            </Row>

@@ -168,12 +168,8 @@ export const getMyRoute = async (req: Request, res: Response, next: NextFunction
   try {
     const user = (req as any).user;
     
-    // Grab todays visits 
-    const start = new Date(); start.setHours(0, 0, 0, 0);
-    const end = new Date(); end.setHours(23, 59, 59, 999);
-    
     const visits = await prisma.visit.findMany({
-      where: { assignedTo: user.id, status: { notIn: ['CANCELLED', 'COMPLETED'] }, scheduledAt: { gte: start, lte: end } },
+      where: { assignedTo: user.id, status: { notIn: ['CANCELLED', 'COMPLETED'] } },
       include: { lead: { select: { name: true, address: true } }, customer: { select: { name: true, address: true } } }
     });
 
